@@ -1,9 +1,10 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useFileStore, FileItem } from '../store/fileStore';
 import { useAuthStore } from '../store/authStore';
 import { Search, Grid, List as ListIcon, Loader2, File as FileIcon, Folder, Download, Trash2, MoreVertical } from 'lucide-react';
 import clsx from 'clsx';
+import { FileViewer } from '../components/FileViewer';
 
 const Home: React.FC = () => {
   const { 
@@ -11,6 +12,7 @@ const Home: React.FC = () => {
     uploadFile, isUploading, uploadProgress, deleteFile, downloadFile 
   } = useFileStore();
   const { isAuthenticated, user } = useAuthStore();
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
 
   useEffect(() => {
     fetchFiles();
@@ -51,8 +53,21 @@ const Home: React.FC = () => {
       downloadFile(file.id, file.name);
   };
 
+  const handleFileDoubleClick = (e: React.MouseEvent, file: FileItem) => {
+      e.stopPropagation();
+      if (file.type === 'directory') {
+          // TODO: 进入目录
+          return;
+      }
+      setPreviewFile(file);
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full relative" {...getRootProps()}>
+      {previewFile && (
+          <FileViewer file={previewFile} onClose={() => setPreviewFile(null)} />
+      )}
+
       <input {...getInputProps()} />
       
       {/* Upload Progress Bar */}
@@ -136,7 +151,7 @@ const Home: React.FC = () => {
                         "group bg-zinc-800/50 border border-zinc-700/50 hover:border-primary/50 hover:bg-zinc-800 transition-all cursor-pointer rounded-lg p-3 relative",
                         viewMode === 'list' ? 'flex items-center space-x-4' : 'flex flex-col items-center text-center space-y-3'
                     )}
-                    onDoubleClick={(e) => handleDownload(e, file)}
+                    onDoubleClick={(e) => handleFileDoubleClick(e, file)}
                   >
                     {/* Icon */}
                     <div className="w-10 h-10 bg-zinc-700/50 rounded flex items-center justify-center text-zinc-400">

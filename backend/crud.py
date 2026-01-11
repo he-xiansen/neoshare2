@@ -76,3 +76,12 @@ def delete_file(db: Session, file_id: int):
         db.commit()
         return True
     return False
+
+def update_file_size(db: Session, file_id: int, size: int):
+    db_file = get_file(db, file_id)
+    if db_file:
+        db_file.size = size
+        db.commit()
+        db.refresh(db_file)
+        return db_file
+    return None

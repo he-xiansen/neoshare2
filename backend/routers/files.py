@@ -168,3 +168,86 @@ def delete_file(
         
     crud.delete_file(db, file_id)
     return {"message": "File deleted"}
+
+@router.get("/content/{file_id}")
+def get_file_content(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: Optional[models.User] = Depends(get_optional_user)
+):
+    file_record = crud.get_file(db, file_id)
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    if not file_record.is_public:
+        if not current_user or (current_user.id != file_record.user_id and current_user.role != "admin"):
+             raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # 物理路径
+    if file_record.is_public:
+        base_dir = get_storage_path(True)
+    else:
+        base_dir = get_storage_path(False, file_record.user_id)
+        
+    file_path = os.path.join(base_dir, file_record.path.strip("/"), file_record.name)
+    
+    if not os.path.exists(file_path):
+         raise HTTPException(status_code=404, detail="File on disk not found")
+         
+    # 仅允许读取文本类文件
+    allowed_mimes = ["text/plain", "text/markdown", "application/json", "application/javascript", "text/x-python", "text/html", "text/css"]
+    # 或者尝试读取，如果不是文本则报错
+    # 为了简单，我们只返回文本内容。前端根据 mime_type 决定是否调用此接口。
+    
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return {"content": content, "mime_type": file_record.mime_type}
+    except UnicodeDecodeError:
+         raise HTTPException(status_code=400, detail="Binary file cannot be edited as text")
+    except Exception as e:
+         raise HTTPException(status_code=500, detail=str(e))
+
+class FileUpdate(schemas.BaseModel):
+    content: str
+
+@router.put("/content/{file_id}")
+def update_file_content(
+    file_id: int,
+    update: FileUpdate,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    file_record = crud.get_file(db, file_id)
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    # 只有拥有者或管理员可以编辑，且必须登录（由 Depends 保证）
+    if current_user.role != "admin" and current_user.id != file_record.user_id:
+        # 如果是 public 文件，是否允许所有人编辑？
+        # PRD: "文件资源管理器中的文件...并能进行编辑...登录状态下文件支持双击编辑"
+        # 假设 public 文件也需要登录才能编辑。如果不是自己的，管理员可以编辑。
+        # 如果是 public 且不属于自己，普通用户能编辑吗？
+        # 假设不能，除非是 Wiki 模式。这里保守策略：只能编辑自己的或者管理员。
+        # 如果 public 文件是 admin 创建的，那只有 admin 能改。
+        # 让我们检查所有权。
+        raise HTTPException(status_code=403, detail="Not authorized to edit this file")
+    
+    if file_record.is_public:
+        base_dir = get_storage_path(True)
+    else:
+        base_dir = get_storage_path(False, file_record.user_id)
+        
+    file_path = os.path.join(base_dir, file_record.path.strip("/"), file_record.name)
+    
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(update.content)
+            
+        # 更新文件大小
+        new_size = os.path.getsize(file_path)
+        crud.update_file_size(db, file_id, new_size)
+        
+        return {"message": "File updated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
