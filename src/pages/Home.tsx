@@ -57,9 +57,9 @@ const Home: React.FC = () => {
       
       {/* Upload Progress Bar */}
       {isUploading && (
-          <div className="absolute top-0 left-0 w-full h-1 bg-zinc-800 z-50">
+          <div className="absolute top-0 left-0 w-full h-2 bg-zinc-800 z-50">
               <div 
-                className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300 ease-out"
+                className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300 ease-out shadow-[0_0_10px_rgba(217,70,239,0.5)]"
                 style={{ width: `${uploadProgress}%` }}
               />
           </div>
