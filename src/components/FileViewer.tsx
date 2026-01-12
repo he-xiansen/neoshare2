@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Loader2, Save, Check, Eye, PenLine, AlertCircle } from 'lucide-react';
+import { X, Loader2, Save, Check, Eye, PenLine, AlertCircle, ExternalLink, Code2 } from 'lucide-react';
 import { client } from '../api/client';
 import { FileItem } from '../store/fileStore';
 import { useAuthStore } from '../store/authStore';
@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import { NotebookViewer } from './NotebookViewer';
 
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: Error | null}> {
   constructor(props: {children: React.ReactNode}) {
@@ -45,11 +46,13 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState('');
   const [isEditing, setIsEditing] = useState(false);
-  
+  const [useJupyter, setUseJupyter] = useState(false);
+
   // 判断文件类型
   const isImage = file.mime_type?.startsWith('image/');
   const isPdf = file.mime_type === 'application/pdf';
   const isMarkdown = file.name.endsWith('.md') || file.mime_type === 'text/markdown';
+  const isIpynb = file.name.endsWith('.ipynb');
   const isText = !isImage && !isPdf && (
     file.mime_type?.startsWith('text/') || 
     file.mime_type === 'application/json' ||
@@ -64,11 +67,37 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
 
   const canEdit = isAuthenticated && isText && (user?.role === 'admin' || user?.id === file.user_id);
 
+  // Jupyter URL Calculation
+  const jupyterBaseUrl = 'http://localhost:8888';
+  // Hardcoded token for development convenience matching the launch script
+  const JUPYTER_TOKEN = 'neoshare2024'; 
+  
+  const getJupyterUrl = () => {
+      const rootDir = file.is_public ? 'public' : `${file.user_id}`;
+      const cleanPath = file.path.startsWith('/') ? file.path.slice(1) : file.path;
+      const filePath = [rootDir, cleanPath, file.name].filter(Boolean).join('/');
+      
+      const baseUrl = isIpynb 
+        ? `${jupyterBaseUrl}/notebooks/${filePath}`
+        : `${jupyterBaseUrl}/edit/${filePath}`;
+      
+      return `${baseUrl}?token=${JUPYTER_TOKEN}`;
+  };
+  const jupyterUrl = getJupyterUrl();
+
   useEffect(() => {
-    if (isText) {
+    if (isText || isIpynb) {
+      setUseJupyter(true);
+    } else {
+      setUseJupyter(false);
+    }
+  }, [file, isText, isIpynb]);
+
+  useEffect(() => {
+    if (isText && !useJupyter) {
       fetchContent();
     }
-  }, [file]);
+  }, [file, useJupyter]);
 
   // 如果是 Markdown，默认进入预览模式；其他文本默认进入编辑模式（如果可编辑）
   useEffect(() => {
@@ -89,8 +118,13 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
   const fetchContent = async () => {
     setLoading(true);
     try {
-      const res = await client.get(`/files/content/${file.id}`);
-      setContent(res.data.content);
+      if (isIpynb && !isEditing) {
+        const res = await client.get(`/files/preview/${file.id}`);
+        setContent(res.data.html);
+      } else {
+        const res = await client.get(`/files/content/${file.id}`);
+        setContent(res.data.content);
+      }
     } catch (err) {
       setError('无法加载文件内容');
     } finally {
@@ -134,7 +168,32 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
              )}
           </div>
           <div className="flex items-center space-x-2">
-            {canEdit && isMarkdown && (
+            {(isText || isIpynb) && (
+                <button
+                    onClick={() => setUseJupyter(!useJupyter)}
+                    className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                        useJupyter ? 'bg-orange-500/80 hover:bg-orange-600 text-white' : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300'
+                    }`}
+                    title={useJupyter ? "Switch to Native Editor" : "Switch to Jupyter"}
+                >
+                    <Code2 className="w-4 h-4" />
+                    <span>Jupyter</span>
+                </button>
+            )}
+
+            {useJupyter && (
+                <a 
+                    href={jupyterUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="p-2 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-colors"
+                    title="在浏览器新标签页打开"
+                >
+                    <ExternalLink className="w-5 h-5" />
+                </a>
+            )}
+
+            {!useJupyter && canEdit && (isMarkdown || isIpynb) && (
                 <button 
                     onClick={() => setIsEditing(!isEditing)}
                     className="flex items-center space-x-1 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-white rounded-lg text-sm transition-colors"
@@ -144,7 +203,7 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
                 </button>
             )}
             
-            {canEdit && isEditing && (
+            {!useJupyter && canEdit && isEditing && (
                 <button 
                     onClick={handleSave}
                     disabled={saving}
@@ -165,13 +224,19 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
 
         {/* Content */}
         <div className="flex-1 overflow-hidden relative bg-zinc-950">
-          {isImage ? (
+          {useJupyter ? (
+             <iframe 
+                 src={jupyterUrl} 
+                 className="w-full h-full border-none bg-white" 
+                 title="Jupyter Notebook"
+             />
+          ) : isImage ? (
             <div className="w-full h-full flex items-center justify-center p-4">
                <img src={downloadUrl} alt={file.name} className="max-w-full max-h-full object-contain" />
             </div>
           ) : isPdf ? (
             <iframe src={downloadUrl} className="w-full h-full border-none" title="PDF Preview" />
-          ) : isText ? (
+          ) : (isText || isIpynb) ? (
             loading ? (
                 <div className="flex items-center justify-center h-full">
                     <Loader2 className="w-8 h-8 text-primary animate-spin" />
@@ -184,10 +249,11 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
                 <>
                     {isMarkdown && !isEditing ? (
                         <div className="w-full h-full overflow-auto p-8 bg-zinc-900 prose prose-invert max-w-none">
-                            <ReactMarkdown 
-                                remarkPlugins={[remarkGfm, remarkMath]}
-                                rehypePlugins={[rehypeKatex]}
-                                components={{
+                            <ErrorBoundary>
+                                <ReactMarkdown 
+                                    remarkPlugins={[remarkGfm, remarkMath]}
+                                    rehypePlugins={[rehypeKatex]}
+                                    components={{
                                         img: ({node, ...props}) => (
                                             <span className="block my-4">
                                                 <img 
@@ -203,11 +269,21 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
                                             <p {...props} className="mb-4 leading-relaxed" />
                                         )
                                     }}
-                            >
-                                {content}
-                            </ReactMarkdown>
+                                >
+                                    {content}
+                                </ReactMarkdown>
+                            </ErrorBoundary>
                         </div>
-                    ) : (
+                    ) : isIpynb && !isEditing ? (
+                         <div className="w-full h-full overflow-auto bg-zinc-900 p-8">
+                             <ErrorBoundary>
+                                 <div 
+                                     className="prose prose-invert max-w-none notebook-html"
+                                     dangerouslySetInnerHTML={{ __html: content }} 
+                                 />
+                             </ErrorBoundary>
+                         </div>
+                     ) : (
                         <textarea
                             value={content}
                             onChange={e => setContent(e.target.value)}

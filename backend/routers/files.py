@@ -251,3 +251,51 @@ def update_file_content(
         return {"message": "File updated"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/preview/{file_id}")
+def preview_ipynb(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: Optional[models.User] = Depends(get_optional_user)
+):
+    """
+    Convert IPYNB to HTML for preview
+    """
+    file_record = crud.get_file(db, file_id)
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    if not file_record.is_public:
+        if not current_user or (current_user.id != file_record.user_id and current_user.role != "admin"):
+             raise HTTPException(status_code=403, detail="Not authorized")
+    
+    if not file_record.name.endswith(".ipynb"):
+         raise HTTPException(status_code=400, detail="Not a notebook file")
+
+    if file_record.is_public:
+        base_dir = get_storage_path(True)
+    else:
+        base_dir = get_storage_path(False, file_record.user_id)
+        
+    file_path = os.path.join(base_dir, file_record.path.strip("/"), file_record.name)
+    
+    if not os.path.exists(file_path):
+         raise HTTPException(status_code=404, detail="File on disk not found")
+         
+    try:
+        from nbconvert import HTMLExporter
+        import nbformat
+        
+        # 读取 notebook
+        with open(file_path, "r", encoding="utf-8") as f:
+            notebook_content = nbformat.read(f, as_version=4)
+            
+        # 转换为 HTML
+        html_exporter = HTMLExporter()
+        html_exporter.theme = "dark" # 尝试使用暗色主题
+        (body, resources) = html_exporter.from_notebook_node(notebook_content)
+        
+        return {"html": body}
+    except Exception as e:
+        print(f"Conversion error: {e}")
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
