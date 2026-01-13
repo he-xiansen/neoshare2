@@ -13,6 +13,16 @@ router = APIRouter(
 
 UPLOAD_DIR = "uploads"
 
+oauth2_scheme = auth.oauth2_scheme
+
+async def get_optional_user(token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
+    if not token:
+        return None
+    try:
+        return await auth.get_current_user(token, db)
+    except HTTPException:
+        return None
+
 def get_storage_path(is_public: bool, user_id: int = None):
     if is_public:
         return os.path.join(UPLOAD_DIR, "public")
@@ -22,44 +32,140 @@ def get_storage_path(is_public: bool, user_id: int = None):
 @router.post("/upload", response_model=schemas.FileResponse)
 async def upload_file(
     file: UploadFile = File(...),
-    path: str = Form(...), # 相对路径，如 "/" 或 "/docs"
-    is_public: bool = Form(False),
+    path: str = Form(...), # 目标目录路径，如 "/" 或 "/docs"
+    is_public: str = Form(...), # "true" or "false"
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(auth.get_current_active_user)
+    token: Optional[str] = Depends(oauth2_scheme)
 ):
-    # 确定存储根目录
-    if is_public:
-        # 所有人都可以上传到 public 吗？PRD 说 "用户登录后可以将本地文件拖入文件资源管理器"。
-        # 如果是 public 目录，登录用户可以上传。
+    # 手动获取 user
+    current_user = None
+    if token:
+        try:
+            current_user = await auth.get_current_user(token, db)
+        except Exception:
+            pass
+
+    is_public_bool = is_public.lower() == "true"
+    
+    # 强制要求登录才能上传（无论是 public 还是 private）
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required for upload")
+        
+    user_id = current_user.id
+    
+    if is_public_bool:
         base_dir = get_storage_path(True)
     else:
-        base_dir = get_storage_path(False, current_user.id)
+        base_dir = get_storage_path(False, user_id)
+        
+    # 处理目标路径，确保它存在于 DB 中
+    # path 是类似于 "/A/B" 的字符串
+    target_dir_path = path.strip("/").replace("..", "")
+    if target_dir_path == "":
+        full_dir = base_dir
+    else:
+        full_dir = os.path.join(base_dir, target_dir_path)
     
-    # 确保目录存在
-    full_dir = os.path.join(base_dir, path.strip("/").replace("..", "")) # 简单的路径安全处理
+    # 递归创建 DB 目录记录
+    parts = target_dir_path.split("/")
+    current_check_path = ""
+    for part in parts:
+        if not part: continue
+        current_check_path = f"{current_check_path}/{part}"
+        
+        # 检查 DB 是否存在该目录
+        query = db.query(models.File).filter(
+            models.File.path == (os.path.dirname(current_check_path).replace("\\", "/") if os.path.dirname(current_check_path) != "/" else "/"),
+            models.File.name == part,
+            models.File.type == "directory",
+            models.File.is_public == is_public_bool
+        )
+        if not is_public_bool:
+            query = query.filter(models.File.user_id == user_id)
+            
+        existing_dir = query.first()
+        
+        if not existing_dir:
+            # 创建 DB 记录
+            # parent_path = os.path.dirname(current_check_path)
+            # if parent_path == "/": path = "/" else path = parent_path
+            p_path = os.path.dirname(current_check_path).replace("\\", "/")
+            if p_path == "/" or p_path == "":
+                p_path = "/"
+                
+            new_dir_data = schemas.FileCreate(
+                name=part,
+                path=p_path,
+                type="directory",
+                size=0,
+                mime_type=None,
+                is_public=is_public_bool
+            )
+            crud.create_file(db, new_dir_data, user_id)
+            
+    # 确保物理目录存在
     os.makedirs(full_dir, exist_ok=True)
     
     file_path = os.path.join(full_dir, file.filename)
     
-    # 保存文件
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    # 记录到数据库
-    # 注意：这里我们只记录文件元数据。path 字段存储的是相对路径（不包含文件名）
-    # 或者 path 存储完整相对路径？根据 crud 实现，path 参数是目录路径。
-    # 这里的 models.File.path 应该是完整路径还是目录？
-    # 为了方便查询目录下的文件，path 最好是目录路径。
-    
     file_size = os.path.getsize(file_path)
+    mime_type = file.content_type
+    
+    db_path = "/" + target_dir_path if target_dir_path else "/"
     
     file_data = schemas.FileCreate(
         name=file.filename,
-        path=path, # 目录路径
+        path=db_path,
         type="file",
         size=file_size,
-        mime_type=file.content_type,
-        is_public=is_public
+        mime_type=mime_type,
+        is_public=is_public_bool
+    )
+    
+    return crud.create_file(db=db, file=file_data, user_id=user_id)
+
+class DirectoryCreate(schemas.BaseModel):
+    name: str
+    path: str
+    is_public: bool = False
+
+@router.post("/directory", response_model=schemas.FileResponse)
+def create_directory(
+    dir_data: DirectoryCreate,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    # 确定存储根目录
+    if dir_data.is_public:
+        base_dir = get_storage_path(True)
+    else:
+        base_dir = get_storage_path(False, current_user.id)
+        
+    # 确保父目录存在
+    # path 是父目录路径
+    parent_dir = os.path.join(base_dir, dir_data.path.strip("/").replace("..", ""))
+    os.makedirs(parent_dir, exist_ok=True)
+    
+    # 创建新目录
+    new_dir_path = os.path.join(parent_dir, dir_data.name)
+    try:
+        os.makedirs(new_dir_path, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=f"Failed to create directory: {e}")
+        
+    # 检查是否已存在同名记录
+    # 这里简单处理，实际上应该检查 DB
+    
+    file_data = schemas.FileCreate(
+        name=dir_data.name,
+        path=dir_data.path,
+        type="directory",
+        size=0,
+        mime_type=None,
+        is_public=dir_data.is_public
     )
     
     return crud.create_file(db=db, file=file_data, user_id=current_user.id)
@@ -81,26 +187,128 @@ def list_files(
     # 但是我们怎么在同一个函数里处理？
     pass
 
-# 重新定义 list_files 以支持可选认证比较复杂，
-# 我们拆分为 public_list 和 private_list 或者在内部处理。
-# 为了遵循 API 定义 GET /api/files/list，我们需要一个依赖项来尝试获取用户但不报错。
+# 辅助函数：同步物理目录到数据库
+def sync_directory_to_db(db: Session, base_dir: str, current_path: str, is_public: bool, user_id: int, depth: int = 0):
+    """
+    递归扫描物理目录并更新数据库
+    base_dir: 物理根目录 (e.g. uploads/public)
+    current_path: 当前相对路径 (e.g. /)
+    depth: 递归深度限制，防止过深
+    """
+    # 限制递归深度，防止死循环或性能问题
+    if depth > 5:
+        return
 
-from fastapi.security import OAuth2PasswordBearer
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
+    physical_path = os.path.join(base_dir, current_path.strip("/").replace("..", ""))
+    if not os.path.exists(physical_path):
+        return
 
-async def get_optional_user(token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
-    if not token:
-        return None
+    # 获取物理目录下的所有项
     try:
-        return await auth.get_current_user(token, db)
-    except HTTPException:
-        return None
+        items = os.listdir(physical_path)
+    except OSError:
+        return
+
+    # 获取 DB 中该路径下的所有项
+    db_files = crud.get_files(db, path=current_path, is_public=is_public, user_id=user_id)
+    
+    # 修复重复文件问题：
+    # 如果 DB 中存在同名文件，保留一个，删除其他的
+    # 我们使用字典来追踪已见过的名字
+    seen_files = {}
+    duplicates_to_delete = []
+    
+    for f in db_files:
+        if f.name in seen_files:
+            duplicates_to_delete.append(f)
+        else:
+            seen_files[f.name] = f
+            
+    # 删除重复的记录
+    for dup in duplicates_to_delete:
+        crud.delete_file(db, dup.id)
+        
+    # 使用去重后的字典
+    db_file_map = seen_files
+    
+    # 遍历物理项
+    for item_name in items:
+        item_path = os.path.join(physical_path, item_name)
+        is_dir = os.path.isdir(item_path)
+        item_type = "directory" if is_dir else "file"
+        
+        # 忽略系统文件
+        if item_name.startswith("."):
+            continue
+
+        if item_name not in db_file_map:
+            # DB 中不存在，创建记录
+            size = 0
+            mime_type = None
+            if not is_dir:
+                size = os.path.getsize(item_path)
+                import mimetypes
+                mime_type, _ = mimetypes.guess_type(item_path)
+            
+            new_file = schemas.FileCreate(
+                name=item_name,
+                path=current_path,
+                type=item_type,
+                size=size,
+                mime_type=mime_type,
+                is_public=is_public
+            )
+            crud.create_file(db, new_file, user_id)
+            
+            # 如果是目录，递归同步
+            # 只有当请求路径正好是父级时，我们才深入去同步子目录？
+            # 或者我们只同步当前层级？
+            # 为了防止每次 list 请求都全量递归扫描，我们只扫描当前请求的 path 下的一层。
+            # 如果 item 是目录，我们记录它的存在，但不需要立即深入进去同步它的内容。
+            # 只有当用户点击进入该目录（请求该目录的 list）时，才会同步该目录的内容。
+            # 所以，这里去掉递归调用！
+            # if is_dir:
+            #     sync_directory_to_db(db, base_dir, f"{current_path}/{item_name}".replace("//", "/"), is_public, user_id, depth + 1)
+        else:
+            # DB 中存在，检查是否需要更新（例如大小）
+            db_item = db_file_map[item_name]
+            if not is_dir:
+                size = os.path.getsize(item_path)
+                if db_item.size != size:
+                    crud.update_file_size(db, db_item.id, size)
+            
+            # 从 map 中移除，表示已处理
+            del db_file_map[item_name]
+            
+            # 同样，去掉递归调用
+            # if is_dir:
+            #     sync_directory_to_db(db, base_dir, f"{current_path}/{item_name}".replace("//", "/"), is_public, user_id, depth + 1)
+
+    # 处理 DB 中存在但物理上不存在的项 (db_file_map 中剩余的)
+    # 暂时不删除，或者标记为丢失？
+    # 为了保持一致性，应该删除 DB 记录
+    for missing_name, missing_record in db_file_map.items():
+        crud.delete_file(db, missing_record.id)
 
 @router.get("/list/public", response_model=List[schemas.FileResponse])
 def list_public_files(
     path: str = Query("/", description="Directory path"),
     db: Session = Depends(database.get_db)
 ):
+    # 在列出之前，先尝试同步该目录（以及子目录？）
+    # 为了性能，可能只同步当前目录
+    # 但如果是第一次，可能需要同步整个结构
+    # 这里为了简单，每次请求同步当前层级
+    
+    base_dir = get_storage_path(True)
+    # 获取默认管理员用户 ID 用于 public 文件的 owner
+    # 假设 ID 1 是 admin
+    # 或者我们查找一个 admin 用户
+    admin_user = crud.get_user_by_username(db, "admin")
+    admin_id = admin_user.id if admin_user else 1 # Fallback
+    
+    sync_directory_to_db(db, base_dir, path, True, admin_id)
+    
     return crud.get_files(db, path=path, is_public=True)
 
 @router.get("/list/private", response_model=List[schemas.FileResponse])
@@ -109,6 +317,9 @@ def list_private_files(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
+    base_dir = get_storage_path(False, current_user.id)
+    sync_directory_to_db(db, base_dir, path, False, current_user.id)
+    
     return crud.get_files(db, path=path, is_public=False, user_id=current_user.id)
 
 
@@ -170,11 +381,18 @@ def delete_file(
     return {"message": "File deleted"}
 
 @router.get("/content/{file_id}")
-def get_file_content(
+async def get_file_content(
     file_id: int,
     db: Session = Depends(database.get_db),
-    current_user: Optional[models.User] = Depends(get_optional_user)
+    token: Optional[str] = Depends(oauth2_scheme)
 ):
+    current_user = None
+    if token:
+        try:
+            current_user = await auth.get_current_user(token, db)
+        except Exception:
+            pass
+
     file_record = crud.get_file(db, file_id)
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
@@ -253,14 +471,21 @@ def update_file_content(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/preview/{file_id}")
-def preview_ipynb(
+async def preview_ipynb(
     file_id: int,
     db: Session = Depends(database.get_db),
-    current_user: Optional[models.User] = Depends(get_optional_user)
+    token: Optional[str] = Depends(oauth2_scheme)
 ):
     """
     Convert IPYNB to HTML for preview
     """
+    current_user = None
+    if token:
+        try:
+            current_user = await auth.get_current_user(token, db)
+        except Exception:
+            pass
+
     file_record = crud.get_file(db, file_id)
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")

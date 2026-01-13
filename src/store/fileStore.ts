@@ -28,7 +28,8 @@ interface FileState {
   setCurrentType: (type: 'public' | 'private') => void;
   
   fetchFiles: (path?: string, type?: 'public' | 'private') => Promise<void>;
-  uploadFile: (file: File) => Promise<void>;
+  uploadFile: (file: File, relativeFolder?: string) => Promise<void>;
+  createFolder: (name: string) => Promise<void>;
   deleteFile: (fileId: number) => Promise<void>;
   downloadFile: (fileId: number, fileName: string) => Promise<void>;
 }
@@ -70,13 +71,24 @@ export const useFileStore = create<FileState>((set, get) => ({
     }
   },
 
-  uploadFile: async (file) => {
+  uploadFile: async (file, relativeFolder) => {
     set({ isUploading: true, uploadProgress: 0 });
     const { currentPath, currentType, fetchFiles } = get();
     
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('path', currentPath);
+    
+    // 计算目标路径
+    let targetPath = currentPath;
+    if (relativeFolder) {
+        // relativeFolder 如 "/A/B" 或 "A/B"
+        const cleanRelative = relativeFolder.replace(/^\//, '').replace(/\/$/, '');
+        if (cleanRelative) {
+            targetPath = currentPath === '/' ? `/${cleanRelative}` : `${currentPath}/${cleanRelative}`;
+        }
+    }
+    
+    formData.append('path', targetPath);
     formData.append('is_public', String(currentType === 'public'));
 
     try {
@@ -98,6 +110,21 @@ export const useFileStore = create<FileState>((set, get) => ({
       setTimeout(() => {
         set({ isUploading: false, uploadProgress: 0 });
       }, 1000);
+    }
+  },
+
+  createFolder: async (name) => {
+    const { currentPath, currentType, fetchFiles } = get();
+    try {
+      await client.post('/files/directory', {
+        name,
+        path: currentPath,
+        is_public: currentType === 'public'
+      });
+      await fetchFiles();
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+      throw error;
     }
   },
 

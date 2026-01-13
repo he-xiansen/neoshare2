@@ -2,15 +2,46 @@ import React, { useEffect, useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useFileStore, FileItem } from '../store/fileStore';
 import { useAuthStore } from '../store/authStore';
-import { Search, Grid, List as ListIcon, Loader2, File as FileIcon, Folder, Download, Trash2, MoreVertical } from 'lucide-react';
+import { Search, Grid, List as ListIcon, Loader2, File as FileIcon, Folder, Download, Trash2, MoreVertical, Upload, FolderPlus } from 'lucide-react';
 import clsx from 'clsx';
 import { FileViewer } from '../components/FileViewer';
+import { InputModal } from '../components/InputModal';
 
 const Home: React.FC = () => {
   const { 
-    files, isLoading, viewMode, setViewMode, fetchFiles, currentType, 
-    uploadFile, isUploading, uploadProgress, deleteFile, downloadFile 
+    files, isLoading, viewMode, setViewMode, fetchFiles, currentType, currentPath, setCurrentPath,
+    uploadFile, createFolder, isUploading, uploadProgress, deleteFile, downloadFile 
   } = useFileStore();
+
+  const [isCreateFolderModalOpen, setIsCreateFolderModalOpen] = useState(false);
+
+  const handleCreateFolder = async (name: string) => {
+    try {
+      await createFolder(name);
+      setIsCreateFolderModalOpen(false);
+    } catch (error) {
+      alert('创建文件夹失败');
+    }
+  };
+  
+  const handleNavigate = (path: string) => {
+      // 导航到指定路径
+      fetchFiles(path);
+  };
+  
+  const handleGoBack = () => {
+      // 返回上一级
+      if (currentPath === '/') return;
+      const parts = currentPath.split('/');
+      parts.pop(); // 移除最后一部分
+      const newPath = parts.length === 1 ? '/' : parts.join('/'); // 如果只剩空字符串（因为 split '/'），则为 '/'
+      // split '/A/B' -> ['', 'A', 'B'] -> pop -> ['', 'A'] -> join -> '/A'
+      // split '/A' -> ['', 'A'] -> pop -> [''] -> join -> '' -> 应该是 '/'
+      
+      const parentPath = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/';
+      fetchFiles(parentPath);
+  };
+
   const { isAuthenticated, user } = useAuthStore();
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
 
@@ -20,12 +51,39 @@ const Home: React.FC = () => {
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
-      // 仅处理第一个文件示例，或者循环处理
       for (const file of acceptedFiles) {
         try {
-          await uploadFile(file);
+          // 尝试获取文件的相对路径（如果是文件夹拖拽）
+          // react-dropzone 提供的 path 属性通常包含相对路径
+          const filePath = (file as any).path || (file as any).webkitRelativePath || file.name;
+          
+          // 解析路径获取文件夹结构
+          // 例如 /folder/file.txt -> relativeFolder = "/folder"
+          // 如果是根目录文件 /file.txt -> relativeFolder = ""
+          // 如果直接拖拽文件 a.txt -> /a.txt -> relativeFolder = ""
+          
+          let relativeFolder = '';
+          if (filePath) {
+              const parts = filePath.split('/');
+              // split '/test2/1.txt' -> ['', 'test2', '1.txt']
+              // split '/1.txt' -> ['', '1.txt']
+              // split '1.txt' -> ['1.txt']
+              
+              if (parts.length > 0) {
+                  // 移除文件名
+                  parts.pop(); 
+                  // 重新组合
+                  relativeFolder = parts.join('/');
+              }
+          }
+          
+          // 调试日志
+          console.log('Uploading file:', file.name, 'Path:', filePath, 'Relative:', relativeFolder);
+          
+          await uploadFile(file, relativeFolder);
         } catch (error) {
-          alert('上传失败');
+          console.error('Upload failed', error);
+          alert(`上传失败: ${file.name}`);
         }
       }
     }
@@ -56,7 +114,9 @@ const Home: React.FC = () => {
   const handleFileDoubleClick = (e: React.MouseEvent, file: FileItem) => {
       e.stopPropagation();
       if (file.type === 'directory') {
-          // TODO: 进入目录
+          // 进入目录
+          const newPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
+          fetchFiles(newPath);
           return;
       }
       setPreviewFile(file);
@@ -89,7 +149,22 @@ const Home: React.FC = () => {
 
       {/* Top Bar */}
       <header className="h-16 border-b border-zinc-700 flex items-center justify-between px-6 bg-secondary/50 backdrop-blur-sm">
-        <div className="flex items-center flex-1 max-w-xl">
+        <div className="flex items-center flex-1 max-w-xl space-x-4">
+          {/* Back Button */}
+          <button 
+            onClick={handleGoBack}
+            disabled={currentPath === '/'}
+            className="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            title="返回上一级"
+          >
+             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          
+          {/* Breadcrumb / Path Display (Simple) */}
+          <div className="text-sm font-medium text-zinc-300 truncate max-w-[200px]">
+             {currentPath}
+          </div>
+
           <div className="relative w-full">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-zinc-500 w-4 h-4" />
             <input 
@@ -124,7 +199,27 @@ const Home: React.FC = () => {
            <h2 className="text-xl font-semibold text-white">
              {currentType === 'public' ? '公共文件' : '我的文件'}
            </h2>
-           <span className="text-zinc-500 text-sm">{files.length} 个项目</span>
+           <div className="flex items-center space-x-4">
+               <span className="text-zinc-500 text-sm hidden sm:block">{files.length} 个项目</span>
+               {isAuthenticated && (
+                   <>
+                       <button 
+                           onClick={() => setIsCreateFolderModalOpen(true)}
+                           className="flex items-center space-x-1 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg text-sm transition-colors border border-zinc-700"
+                       >
+                           <FolderPlus className="w-4 h-4" />
+                           <span>新建文件夹</span>
+                       </button>
+                       <button 
+                           onClick={open}
+                           className="flex items-center space-x-1 px-3 py-1.5 bg-primary hover:bg-fuchsia-600 text-white rounded-lg text-sm transition-colors"
+                       >
+                           <Upload className="w-4 h-4" />
+                           <span>上传文件</span>
+                       </button>
+                   </>
+               )}
+           </div>
         </div>
 
         {isLoading ? (
