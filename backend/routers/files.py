@@ -6,6 +6,8 @@ import shutil
 import os
 from .. import database, crud, schemas, auth, models
 
+from fastapi.security import OAuth2PasswordBearer
+
 router = APIRouter(
     prefix="/api/files",
     tags=["files"],
@@ -14,8 +16,10 @@ router = APIRouter(
 UPLOAD_DIR = "uploads"
 
 oauth2_scheme = auth.oauth2_scheme
+# 定义一个可选的认证方案，允许未登录访问
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
-async def get_optional_user(token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
+async def get_optional_user(token: Optional[str] = Depends(oauth2_scheme_optional), db: Session = Depends(database.get_db)):
     if not token:
         return None
     try:
@@ -192,7 +196,14 @@ def calculate_directory_size(path: str):
     total_size = 0
     try:
         for dirpath, dirnames, filenames in os.walk(path):
+            # 忽略隐藏目录，阻止 os.walk 进入
+            dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+            
             for f in filenames:
+                # 忽略隐藏文件
+                if f.startswith('.'):
+                    continue
+                    
                 fp = os.path.join(dirpath, f)
                 if not os.path.islink(fp):
                     total_size += os.path.getsize(fp)
@@ -306,17 +317,27 @@ def sync_directory_to_db(db: Session, base_dir: str, current_path: str, is_publi
 @router.get("/list/public", response_model=List[schemas.FileResponse])
 def list_public_files(
     path: str = Query("/", description="Directory path"),
+    search: Optional[str] = Query(None, description="Search query"),
     db: Session = Depends(database.get_db)
 ):
-    # 在列出之前，先尝试同步该目录（以及子目录？）
-    # 为了性能，可能只同步当前目录
-    # 但如果是第一次，可能需要同步整个结构
-    # 这里为了简单，每次请求同步当前层级
+    # Normalize path
+    path = path.strip()
+    if path != "/" and path.endswith("/"):
+        path = path.rstrip("/")
+    if path.endswith("/."):
+        path = path[:-2]
+    if path == "": path = "/"
+
+    # 如果有 search，则搜索 public 目录下的所有文件
+    if search:
+        # 搜索时不强制 sync，或者只 sync 根目录？
+        # 搜索通常是全库搜索，不依赖于当前 path
+        # 简单的实现：在 DB 中搜索
+        return crud.search_files(db, query=search, is_public=True)
     
+    # 正常列表逻辑...
     base_dir = get_storage_path(True)
-    # 获取默认管理员用户 ID 用于 public 文件的 owner
-    # 假设 ID 1 是 admin
-    # 或者我们查找一个 admin 用户
+    # ... (原有逻辑)
     admin_user = crud.get_user_by_username(db, "admin")
     admin_id = admin_user.id if admin_user else 1 # Fallback
     
@@ -327,9 +348,21 @@ def list_public_files(
 @router.get("/list/private", response_model=List[schemas.FileResponse])
 def list_private_files(
     path: str = Query("/", description="Directory path"),
+    search: Optional[str] = Query(None, description="Search query"),
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
+    # Normalize path
+    path = path.strip()
+    if path != "/" and path.endswith("/"):
+        path = path.rstrip("/")
+    if path.endswith("/."):
+        path = path[:-2]
+    if path == "": path = "/"
+
+    if search:
+        return crud.search_files(db, query=search, is_public=False, user_id=current_user.id)
+
     base_dir = get_storage_path(False, current_user.id)
     sync_directory_to_db(db, base_dir, path, False, current_user.id)
     
@@ -397,7 +430,7 @@ def delete_file(
 async def get_file_content(
     file_id: int,
     db: Session = Depends(database.get_db),
-    token: Optional[str] = Depends(oauth2_scheme)
+    token: Optional[str] = Depends(oauth2_scheme_optional)
 ):
     current_user = None
     if token:
@@ -487,7 +520,7 @@ def update_file_content(
 async def preview_ipynb(
     file_id: int,
     db: Session = Depends(database.get_db),
-    token: Optional[str] = Depends(oauth2_scheme)
+    token: Optional[str] = Depends(oauth2_scheme_optional)
 ):
     """
     Convert IPYNB to HTML for preview

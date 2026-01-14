@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { useFileStore, FileItem } from '../store/fileStore';
 import { useAuthStore } from '../store/authStore';
@@ -6,12 +7,33 @@ import { Search, Grid, List as ListIcon, Loader2, File as FileIcon, Folder, Down
 import clsx from 'clsx';
 import { FileViewer } from '../components/FileViewer';
 import { InputModal } from '../components/InputModal';
+import { FileIconComponent } from '../components/FileIcon';
 
 const Home: React.FC = () => {
   const { 
     files, isLoading, viewMode, setViewMode, fetchFiles, currentType, currentPath, setCurrentPath,
     uploadFile, createFolder, isUploading, uploadProgress, deleteFile, downloadFile 
   } = useFileStore();
+
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Sync URL with current path
+  useEffect(() => {
+      const pathFromUrl = decodeURIComponent(location.pathname);
+      let targetPath = pathFromUrl;
+      
+      // Remove trailing slash if it exists and path is not root
+      if (targetPath.length > 1 && targetPath.endsWith('/')) {
+          targetPath = targetPath.slice(0, -1);
+      }
+      
+      // If path matches current path, do nothing
+      if (targetPath === currentPath) return;
+
+      // Update store and fetch files
+      fetchFiles(targetPath);
+  }, [location.pathname, currentPath, fetchFiles]);
 
   const [isCreateFolderModalOpen, setIsCreateFolderModalOpen] = useState(false);
 
@@ -32,22 +54,37 @@ const Home: React.FC = () => {
   const handleGoBack = () => {
       // 返回上一级
       if (currentPath === '/') return;
+      
       const parts = currentPath.split('/');
       parts.pop(); // 移除最后一部分
-      const newPath = parts.length === 1 ? '/' : parts.join('/'); // 如果只剩空字符串（因为 split '/'），则为 '/'
-      // split '/A/B' -> ['', 'A', 'B'] -> pop -> ['', 'A'] -> join -> '/A'
-      // split '/A' -> ['', 'A'] -> pop -> [''] -> join -> '' -> 应该是 '/'
       
-      const parentPath = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/';
-      fetchFiles(parentPath);
+      // 如果只剩空字符串（因为 split '/' 产生的第一个空元素），则为 '/'
+      // 例如："/test2".split('/') -> ["", "test2"] -> pop -> [""] -> join -> "" (空字符串)
+      // 例如："/test2/sub".split('/') -> ["", "test2", "sub"] -> pop -> ["", "test2"] -> join -> "/test2"
+      
+      let newPath = parts.join('/');
+      if (newPath === '') newPath = '/';
+      
+      navigate(newPath);
   };
 
   const { isAuthenticated, user } = useAuthStore();
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
+  // 防抖搜索
   useEffect(() => {
-    fetchFiles();
-  }, [fetchFiles]);
+      const timer = setTimeout(() => {
+          if (searchQuery) {
+              fetchFiles(undefined, undefined, searchQuery);
+          } else {
+              // 如果清空搜索，重新加载当前路径
+              fetchFiles();
+          }
+      }, 500);
+      
+      return () => clearTimeout(timer);
+  }, [searchQuery, fetchFiles]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -116,9 +153,14 @@ const Home: React.FC = () => {
       if (file.type === 'directory') {
           // 进入目录
           const newPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
-          fetchFiles(newPath);
+          navigate(newPath);
           return;
       }
+      
+      // 检查文件是否可以编辑
+      // 如果不是目录，且支持编辑，则打开编辑/预览
+      // 如果不支持预览，可能是二进制文件，提示下载
+      // 目前 previewFile 逻辑是在 FileViewer 中处理，FileViewer 会决定是显示图片、PDF 还是代码编辑器
       setPreviewFile(file);
   };
 
@@ -177,6 +219,8 @@ const Home: React.FC = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-zinc-500 w-4 h-4" />
             <input 
               type="text" 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="搜索文件..." 
               className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-primary transition-colors text-white"
             />
@@ -258,13 +302,20 @@ const Home: React.FC = () => {
                   >
                     {/* Icon */}
                     <div className="w-10 h-10 bg-zinc-700/50 rounded flex items-center justify-center text-zinc-400">
-                       {file.type === 'directory' ? <Folder className="w-6 h-6" /> : <FileIcon className="w-6 h-6" />}
+                       <FileIconComponent fileName={file.name} isDir={file.type === 'directory'} className="w-6 h-6" />
                     </div>
                     
                     {/* Info */}
                     <div className="flex-1 min-w-0 text-left w-full">
                       <h3 className="text-sm font-medium text-white truncate" title={file.name}>{file.name}</h3>
-                      <p className="text-xs text-zinc-500">{file.size > 0 ? `${(file.size / 1024).toFixed(1)} KB` : '0 KB'}</p>
+                      <div className="flex items-center text-xs text-zinc-500 space-x-2">
+                          <span>{file.size > 0 ? `${(file.size / 1024).toFixed(1)} KB` : '0 KB'}</span>
+                          {searchQuery && (
+                              <span className="text-zinc-300 bg-zinc-700/50 px-2 py-0.5 rounded truncate max-w-[200px]" title={file.path}>
+                                  {file.path}
+                              </span>
+                          )}
+                      </div>
                     </div>
 
                     {/* Actions (Hover) */}

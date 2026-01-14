@@ -27,7 +27,7 @@ interface FileState {
   setViewMode: (mode: 'list' | 'grid') => void;
   setCurrentType: (type: 'public' | 'private') => void;
   
-  fetchFiles: (path?: string, type?: 'public' | 'private') => Promise<void>;
+  fetchFiles: (path?: string, type?: 'public' | 'private', search?: string) => Promise<void>;
   uploadFile: (file: File, relativeFolder?: string) => Promise<void>;
   createFolder: (name: string) => Promise<void>;
   deleteFile: (fileId: number) => Promise<void>;
@@ -48,7 +48,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   setViewMode: (mode) => set({ viewMode: mode }),
   setCurrentType: (type) => set({ currentType: type, currentPath: '/' }),
 
-  fetchFiles: async (path, type) => {
+  fetchFiles: async (path, type, search) => {
     set({ isLoading: true });
     const { currentPath, currentType } = get();
     const targetPath = path !== undefined ? path : currentPath;
@@ -56,9 +56,12 @@ export const useFileStore = create<FileState>((set, get) => ({
     
     try {
       const endpoint = targetType === 'public' ? '/files/list/public' : '/files/list/private';
-      const res = await client.get(endpoint, {
-        params: { path: targetPath }
-      });
+      const params: any = { path: targetPath };
+      if (search) {
+          params.search = search;
+      }
+      
+      const res = await client.get(endpoint, { params });
       set({ 
         files: res.data, 
         currentPath: targetPath, 

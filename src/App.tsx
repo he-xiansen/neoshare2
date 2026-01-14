@@ -23,6 +23,7 @@ function App() {
           <Route index element={<Home />} />
           <Route path="settings" element={<Settings />} />
           <Route path="admin/users" element={<AdminUsers />} />
+          <Route path="*" element={<Home />} />
         </Route>
       </Routes>
     </BrowserRouter>

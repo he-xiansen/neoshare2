@@ -77,6 +77,17 @@ def delete_file(db: Session, file_id: int):
         return True
     return False
 
+def search_files(db: Session, query: str, is_public: bool, user_id: int = None):
+    # 简单的模糊搜索
+    sql_query = db.query(models.File).filter(
+        models.File.name.ilike(f"%{query}%"),
+        models.File.is_public == is_public
+    )
+    if not is_public and user_id:
+        sql_query = sql_query.filter(models.File.user_id == user_id)
+    
+    return sql_query.all()
+
 def update_file_size(db: Session, file_id: int, size: int):
     db_file = get_file(db, file_id)
     if db_file:

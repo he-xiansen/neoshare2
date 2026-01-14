@@ -1,0 +1,9 @@
+{
+  "project": "NeoShare",
+  "version": "1.0.0",
+  "author": "Trae AI",
+  "settings": {
+    "theme": "dark",
+    "notifications": true
+  }
+}
