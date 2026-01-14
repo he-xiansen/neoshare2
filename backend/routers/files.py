@@ -187,6 +187,19 @@ def list_files(
     # 但是我们怎么在同一个函数里处理？
     pass
 
+# 辅助函数：计算目录大小
+def calculate_directory_size(path: str):
+    total_size = 0
+    try:
+        for dirpath, dirnames, filenames in os.walk(path):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                if not os.path.islink(fp):
+                    total_size += os.path.getsize(fp)
+    except OSError:
+        pass
+    return total_size
+
 # 辅助函数：同步物理目录到数据库
 def sync_directory_to_db(db: Session, base_dir: str, current_path: str, is_public: bool, user_id: int, depth: int = 0):
     """
@@ -249,6 +262,9 @@ def sync_directory_to_db(db: Session, base_dir: str, current_path: str, is_publi
                 size = os.path.getsize(item_path)
                 import mimetypes
                 mime_type, _ = mimetypes.guess_type(item_path)
+            else:
+                # 计算目录大小
+                size = calculate_directory_size(item_path)
             
             new_file = schemas.FileCreate(
                 name=item_name,
@@ -261,21 +277,18 @@ def sync_directory_to_db(db: Session, base_dir: str, current_path: str, is_publi
             crud.create_file(db, new_file, user_id)
             
             # 如果是目录，递归同步
-            # 只有当请求路径正好是父级时，我们才深入去同步子目录？
-            # 或者我们只同步当前层级？
-            # 为了防止每次 list 请求都全量递归扫描，我们只扫描当前请求的 path 下的一层。
-            # 如果 item 是目录，我们记录它的存在，但不需要立即深入进去同步它的内容。
-            # 只有当用户点击进入该目录（请求该目录的 list）时，才会同步该目录的内容。
-            # 所以，这里去掉递归调用！
-            # if is_dir:
-            #     sync_directory_to_db(db, base_dir, f"{current_path}/{item_name}".replace("//", "/"), is_public, user_id, depth + 1)
+            # ... (保持原样)
         else:
             # DB 中存在，检查是否需要更新（例如大小）
             db_item = db_file_map[item_name]
+            new_size = 0
             if not is_dir:
-                size = os.path.getsize(item_path)
-                if db_item.size != size:
-                    crud.update_file_size(db, db_item.id, size)
+                new_size = os.path.getsize(item_path)
+            else:
+                new_size = calculate_directory_size(item_path)
+                
+            if db_item.size != new_size:
+                crud.update_file_size(db, db_item.id, new_size)
             
             # 从 map 中移除，表示已处理
             del db_file_map[item_name]

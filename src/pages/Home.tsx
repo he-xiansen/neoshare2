@@ -92,7 +92,7 @@ const Home: React.FC = () => {
   // 只有在已登录且在私有目录，或者（如果是公共目录且允许上传？）
   // PRD: "用户登录后可以将本地文件拖入文件资源管理器" -> 登录用户可以拖入。
   // 未登录不能拖入。
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
     noClick: true,
     noKeyboard: true,
@@ -127,6 +127,14 @@ const Home: React.FC = () => {
       {previewFile && (
           <FileViewer file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
+
+      <InputModal
+        isOpen={isCreateFolderModalOpen}
+        onClose={() => setIsCreateFolderModalOpen(false)}
+        onSubmit={handleCreateFolder}
+        title="新建文件夹"
+        placeholder="请输入文件夹名称"
+      />
 
       <input {...getInputProps()} />
       
