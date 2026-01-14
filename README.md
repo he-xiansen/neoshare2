@@ -5,7 +5,9 @@ NeoShare 是一个现代化的文件共享与协作平台，旨在提供安全�
 ## 🌟 主要特性
 
 *   **文件管理**：
-    *   支持文件上传（拖拽上传）、下载、删除。
+    *   **文件夹支持**：支持创建文件夹、拖拽上传完整文件夹（保留目录结构）、多级目录导航。
+    *   **自动同步**：后端自动扫描物理存储，实现文件系统与数据库的双向实时同步。
+    *   支持文件上传、下载、删除。
     *   支持文件列表的网格视图和列表视图切换。
     *   区分公共文件区（所有用户可见）和个人文件区（仅自己可见）。
 *   **在线预览与编辑**：
@@ -14,7 +16,7 @@ NeoShare 是一个现代化的文件共享与协作平台，旨在提供安全�
     *   支持图片预览。
 *   **Jupyter Notebook 集成**：
     *   **核心亮点**：无缝集成 Jupyter Notebook。
-    *   双击 `.ipynb` 文件直接在应用内预览和运行 Notebook。
+    *   双击 `.ipynb` 文件直接在应用内预览（自动转换为 HTML，保留图表输出）和运行 Notebook。
     *   双击代码文件可选择使用 Jupyter 的编辑器进行编辑。
     *   支持一键切换回原生简易编辑器。
 *   **用户权限**：
@@ -30,13 +32,14 @@ NeoShare 是一个现代化的文件共享与协作平台，旨在提供安全�
 *   **状态管理**: Zustand
 *   **路由**: React Router v6
 *   **UI 组件**: Lucide React (图标)
-*   **其他**: Axios, React Markdown, React Dropzone
+*   **其他**: Axios, React Markdown, React Dropzone, React Syntax Highlighter
 
 ### 后端 (Backend)
 *   **框架**: FastAPI (Python)
 *   **数据库**: SQLite (默认) / PostgreSQL (支持)
 *   **ORM**: SQLAlchemy
 *   **认证**: OAuth2 + JWT (Python-Jose, Passlib)
+*   **工具**: nbconvert (Notebook 转换), Jupyter
 
 ### 核心集成
 *   **Jupyter Notebook**: 作为底层计算和编辑引擎。
@@ -47,6 +50,7 @@ NeoShare 是一个现代化的文件共享与协作平台，旨在提供安全�
 *   Node.js (v18+)
 *   Python (v3.9+)
 *   Jupyter Notebook (`pip install notebook`)
+*   nbconvert (`pip install nbconvert`)
 
 ### 1. 后端部署
 
@@ -63,6 +67,7 @@ NeoShare 是一个现代化的文件共享与协作平台，旨在提供安全�
     ```bash
     cd backend
     pip install -r requirements.txt
+    pip install jupyter nbconvert
     ```
 4.  初始化数据库（首次运行）：
     ```bash
@@ -101,6 +106,7 @@ NeoShare 是一个现代化的文件共享与协作平台，旨在提供安全�
 
 1.  安装依赖：
     ```bash
+    cd frontend # 或项目根目录，视配置而定
     npm install
     ```
 2.  启动开发服务器：

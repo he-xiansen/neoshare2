@@ -4,9 +4,10 @@
 graph TD
     A[用户浏览器] --> B[React前端应用]
     B --> C[FastAPI后端服务]
-    C --> D[PostgreSQL数据库]
+    C --> D[PostgreSQL/SQLite数据库]
     C --> E[文件存储系统]
-    C --> F[Redis缓存]
+    C --> F[Redis缓存(可选)]
+    C --> G[Jupyter/Nbconvert服务]
     
     subgraph "前端层"
         B
@@ -15,6 +16,7 @@ graph TD
     subgraph "后端服务层"
         C
         F
+        G
     end
     
     subgraph "数据存储层"
@@ -28,11 +30,14 @@ graph TD
 - **前端**: React@18 + TypeScript + TailwindCSS + Vite
 - **初始化工具**: vite-init
 - **后端**: FastAPI@0.104 + Python@3.11
-- **数据库**: PostgreSQL@15 + SQLAlchemy@2.0
-- **文件存储**: 本地文件系统 + MinIO（可选）
-- **缓存**: Redis@7
+- **数据库**: PostgreSQL@15 + SQLAlchemy@2.0 (默认使用 SQLite)
+- **文件存储**: 本地文件系统 (自动同步) + MinIO（可选）
+- **缓存**: Redis@7 (可选)
 - **身份认证**: JWT + python-jose
-- **文件预览**: python-magic + PyPDF2
+- **文件预览**: 
+    - 文本/代码: 直接读取
+    - Notebook: nbconvert (转换为 HTML)
+    - PDF/图片: 浏览器原生支持
 
 ## 3. 路由定义
 
@@ -96,7 +101,18 @@ POST /api/files/upload
 | 参数名 | 参数类型 | 是否必需 | 描述 |
 |--------|----------|----------|------|
 | file | File | 是 | 文件对象 |
-| path | string | 是 | 上传路径 |
+| path | string | 是 | 上传路径（支持子目录自动创建） |
+
+**创建文件夹**
+```
+POST /api/files/directory
+```
+
+请求参数：
+| 参数名 | 参数类型 | 是否必需 | 描述 |
+|--------|----------|----------|------|
+| name | string | 是 | 文件夹名称 |
+| path | string | 是 | 父级路径 |
 
 **下载文件**
 ```
@@ -107,6 +123,12 @@ GET /api/files/download/{file_id}
 ```
 DELETE /api/files/{file_id}
 ```
+
+**Notebook 预览**
+```
+GET /api/files/preview/{file_id}
+```
+*返回转换后的 HTML 内容*
 
 ### 4.3 用户管理API
 
@@ -140,9 +162,12 @@ graph TD
     B --> C[认证中间件]
     C --> D[业务逻辑层]
     D --> E[数据访问层]
-    E --> F[(PostgreSQL)]
+    E --> F[(PostgreSQL/SQLite)]
     D --> G[文件服务层]
     G --> H[文件存储系统]
+    G --> I[Sync Service]
+    I --> H
+    I --> E
     
     subgraph "FastAPI应用"
         B
@@ -150,6 +175,7 @@ graph TD
         D
         E
         G
+        I
     end
 ```
 
