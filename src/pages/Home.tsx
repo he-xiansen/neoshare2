@@ -161,7 +161,29 @@ const Home: React.FC = () => {
       // 如果不是目录，且支持编辑，则打开编辑/预览
       // 如果不支持预览，可能是二进制文件，提示下载
       // 目前 previewFile 逻辑是在 FileViewer 中处理，FileViewer 会决定是显示图片、PDF 还是代码编辑器
-      setPreviewFile(file);
+      
+      const isPreviewable = 
+          file.mime_type?.startsWith('image/') || 
+          file.mime_type === 'application/pdf' || 
+          file.name.toLowerCase().endsWith('.pdf') ||
+          file.name.endsWith('.md') || 
+          file.mime_type === 'text/markdown' ||
+          file.name.endsWith('.ipynb') ||
+          file.mime_type?.startsWith('text/') || 
+          file.mime_type === 'application/json' ||
+          file.mime_type === 'application/javascript' ||
+          file.mime_type === 'application/x-python' ||
+          file.name.endsWith('.py') ||
+          file.name.endsWith('.ts') ||
+          file.name.endsWith('.tsx') ||
+          file.name.endsWith('.json');
+
+      if (isPreviewable) {
+          setPreviewFile(file);
+      } else {
+          // 如果不可预览，则执行下载
+          downloadFile(file.id, file.name);
+      }
   };
 
   return (

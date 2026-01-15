@@ -4,7 +4,6 @@
   "author": "Trae AI",
   "settings": {
     "theme": "dark",
-    "notifications": true,
-    "test":"black"
+    "notifications": true
   }
 }

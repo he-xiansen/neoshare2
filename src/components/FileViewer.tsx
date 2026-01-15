@@ -50,7 +50,7 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
 
   // 判断文件类型
   const isImage = file.mime_type?.startsWith('image/');
-  const isPdf = file.mime_type === 'application/pdf';
+  const isPdf = file.mime_type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   const isMarkdown = file.name.endsWith('.md') || file.mime_type === 'text/markdown';
   const isIpynb = file.name.endsWith('.ipynb');
   const isText = !isImage && !isPdf && (
@@ -65,7 +65,7 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
     file.name.endsWith('.json')
   );
 
-  const canEdit = isAuthenticated && isText && (user?.role === 'admin' || user?.id === file.user_id);
+  const canEdit = isText && (file.is_public || (isAuthenticated && (user?.role === 'admin' || user?.id === file.user_id)));
 
   // Jupyter URL Calculation
   const jupyterBaseUrl = 'http://localhost:8888';
@@ -225,11 +225,34 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
         {/* Content */}
         <div className="flex-1 overflow-hidden relative bg-zinc-950">
           {useJupyter ? (
-             <iframe 
-                 src={jupyterUrl} 
-                 className="w-full h-full border-none bg-white" 
-                 title="Jupyter Notebook"
-             />
+             <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-900 space-y-6">
+                 <div className="text-center space-y-2">
+                     <h3 className="text-xl font-medium text-white">Jupyter Notebook 编辑器</h3>
+                     <p className="text-zinc-400 max-w-md mx-auto">
+                         为了防止页面跳转并提供最佳编辑体验，Jupyter 编辑器将在新窗口中打开。
+                     </p>
+                 </div>
+                 
+                 <div className="flex items-center space-x-4">
+                     <a 
+                         href={jupyterUrl} 
+                         target="_blank" 
+                         rel="noopener noreferrer"
+                         className="flex items-center space-x-2 px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors font-medium shadow-lg hover:shadow-orange-500/20"
+                     >
+                         <ExternalLink className="w-5 h-5" />
+                         <span>在新窗口打开 Jupyter</span>
+                     </a>
+                     
+                     <button
+                         onClick={() => setUseJupyter(false)}
+                         className="flex items-center space-x-2 px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg transition-colors border border-zinc-700"
+                     >
+                         <Code2 className="w-5 h-5" />
+                         <span>使用简易编辑器</span>
+                     </button>
+                 </div>
+             </div>
           ) : isImage ? (
             <div className="w-full h-full flex items-center justify-center p-4">
                <img src={downloadUrl} alt={file.name} className="max-w-full max-h-full object-contain" />

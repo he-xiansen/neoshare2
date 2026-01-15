@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { client } from '../api/client';
 import { LayoutGrid, Loader2 } from 'lucide-react';
@@ -98,7 +98,7 @@ const Login: React.FC = () => {
         </form>
 
         <div className="mt-6 text-center text-sm text-zinc-500">
-          没有账号？请联系管理员。
+          没有账号？ <Link to="/register" className="text-primary hover:text-fuchsia-400 transition-colors">立即注册</Link>
         </div>
       </div>
     </div>

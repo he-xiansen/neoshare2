@@ -476,26 +476,31 @@ class FileUpdate(schemas.BaseModel):
     content: str
 
 @router.put("/content/{file_id}")
-def update_file_content(
+async def update_file_content(
     file_id: int,
     update: FileUpdate,
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(auth.get_current_active_user)
+    token: Optional[str] = Depends(oauth2_scheme_optional)
 ):
+    current_user = None
+    if token:
+        try:
+            current_user = await auth.get_current_user(token, db)
+        except Exception:
+            pass
+
     file_record = crud.get_file(db, file_id)
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
         
-    # 只有拥有者或管理员可以编辑，且必须登录（由 Depends 保证）
-    if current_user.role != "admin" and current_user.id != file_record.user_id:
-        # 如果是 public 文件，是否允许所有人编辑？
-        # PRD: "文件资源管理器中的文件...并能进行编辑...登录状态下文件支持双击编辑"
-        # 假设 public 文件也需要登录才能编辑。如果不是自己的，管理员可以编辑。
-        # 如果是 public 且不属于自己，普通用户能编辑吗？
-        # 假设不能，除非是 Wiki 模式。这里保守策略：只能编辑自己的或者管理员。
-        # 如果 public 文件是 admin 创建的，那只有 admin 能改。
-        # 让我们检查所有权。
-        raise HTTPException(status_code=403, detail="Not authorized to edit this file")
+    # 权限检查
+    if not file_record.is_public:
+        # 私有文件：必须登录且是拥有者或管理员
+        if not current_user or (current_user.role != "admin" and current_user.id != file_record.user_id):
+            raise HTTPException(status_code=403, detail="Not authorized to edit this file")
+    else:
+        # 公共文件：允许未登录用户编辑（根据需求开放）
+        pass
     
     if file_record.is_public:
         base_dir = get_storage_path(True)
