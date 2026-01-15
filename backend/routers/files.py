@@ -372,6 +372,7 @@ def list_private_files(
 @router.get("/download/{file_id}")
 def download_file(
     file_id: int,
+    preview: bool = False,
     db: Session = Depends(database.get_db),
     current_user: Optional[models.User] = Depends(get_optional_user) # 使用自定义的可选认证
 ):
@@ -397,7 +398,8 @@ def download_file(
     if not os.path.exists(file_path):
          raise HTTPException(status_code=404, detail="File on disk not found")
          
-    return FileResponse(file_path, filename=file_record.name)
+    content_disposition_type = "inline" if preview else "attachment"
+    return FileResponse(file_path, filename=file_record.name, content_disposition_type=content_disposition_type)
 
 @router.delete("/{file_id}")
 def delete_file(

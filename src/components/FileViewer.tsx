@@ -145,6 +145,7 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
   };
 
   const downloadUrl = `${client.defaults.baseURL}/files/download/${file.id}`;
+  const previewUrl = `${downloadUrl}?preview=true`;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
@@ -255,10 +256,10 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
              </div>
           ) : isImage ? (
             <div className="w-full h-full flex items-center justify-center p-4">
-               <img src={downloadUrl} alt={file.name} className="max-w-full max-h-full object-contain" />
+               <img src={previewUrl} alt={file.name} className="max-w-full max-h-full object-contain" />
             </div>
           ) : isPdf ? (
-            <iframe src={downloadUrl} className="w-full h-full border-none" title="PDF Preview" />
+            <iframe src={previewUrl} className="w-full h-full border-none" title="PDF Preview" />
           ) : (isText || isIpynb) ? (
             loading ? (
                 <div className="flex items-center justify-center h-full">
