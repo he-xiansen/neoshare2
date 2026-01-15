@@ -1,0 +1,344 @@
+# NeoShare 部署文档 (CentOS 7.6)
+
+本文档详细说明如何在 CentOS 7.6 环境下部署 NeoShare 项目，包括前端、后端、Jupyter 服务以及 Nginx 反向代理配置。
+
+## 1. 环境准备
+
+### 1.1 更新系统与安装基础工具
+```bash
+yum update -y
+yum install -y wget git gcc openssl-devel bzip2-devel libffi-devel zlib-devel make
+```
+
+### 1.2 安装 Miniconda (Python 环境)
+使用 Miniconda 管理 Python 环境，比源码编译安装更方便且易于管理。
+
+```bash
+# 下载 Miniconda 安装脚本
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+
+# 执行安装脚本
+# -b: 批处理模式 (自动同意许可协议)
+# -p: 指定安装路径
+bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/miniconda3
+
+# 初始化 conda (使其在当前 shell 生效)
+source /opt/miniconda3/bin/activate
+conda init
+
+# 重新加载 shell 配置
+source ~/.bashrc
+
+# 创建 Python 3.11 环境
+conda create -n neoshare python=3.11 -y
+
+# 激活环境
+conda activate neoshare
+
+# 验证 Python 版本
+python --version
+```
+
+### 1.3 安装 Node.js (用于前端构建)
+推荐安装 Node.js 18.x 或 20.x 版本。
+
+```bash
+curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+yum install -y nodejs
+
+# 验证安装
+node -v
+npm -v
+```
+
+### 1.4 安装 Nginx
+
+```bash
+yum install -y epel-release
+yum install -y nginx
+systemctl enable nginx
+systemctl start nginx
+```
+
+---
+
+## 2. 项目部署
+
+假设项目代码存放在 `/opt/neoshare` 目录。
+
+```bash
+cd /opt
+git clone <your-repository-url> neoshare
+cd neoshare
+```
+
+### 2.1 后端部署
+
+1.  **激活环境**
+    ```bash
+    cd /opt/neoshare/backend
+    conda activate neoshare
+    ```
+
+2.  **安装依赖**
+    ```bash
+    pip install --upgrade pip
+    pip install -r requirements.txt
+    # 安装 Jupyter 相关依赖
+    pip install jupyter notebook
+    ```
+
+3.  **配置 Systemd 服务 (后端 API)**
+    创建文件 `/etc/systemd/system/neoshare-backend.service`:
+
+    ```ini
+    [Unit]
+    Description=NeoShare Backend API
+    After=network.target
+
+    [Service]
+    User=root
+    WorkingDirectory=/opt/neoshare
+    # 使用 Conda 环境中的 python
+    # 路径通常为 /opt/miniconda3/envs/neoshare/bin/python
+    ExecStart=/opt/miniconda3/envs/neoshare/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 4
+    Restart=always
+    Environment="PATH=/opt/miniconda3/envs/neoshare/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+
+    [Install]
+    WantedBy=multi-user.target
+    ```
+
+4.  **配置 Systemd 服务 (Jupyter)**
+    创建文件 `/etc/systemd/system/neoshare-jupyter.service`:
+
+    ```ini
+    [Unit]
+    Description=NeoShare Jupyter Service
+    After=network.target
+
+    [Service]
+    User=root
+    WorkingDirectory=/opt/neoshare/uploads
+    # 确保 uploads 目录存在
+    ExecStartPre=/bin/mkdir -p /opt/neoshare/uploads
+    # 使用 Conda 环境中的 python 启动 jupyter
+    # 注意：如果启用了 Jupyter base_url，请加上 --ServerApp.base_url='/jupyter/'
+    ExecStart=/opt/miniconda3/envs/neoshare/bin/python -m jupyter notebook --ip=127.0.0.1 --port=8888 --no-browser --ServerApp.base_url='/jupyter/' --ServerApp.token='neoshare2024' --ServerApp.password='' --ServerApp.allow_origin='*' --ServerApp.tornado_settings="{'headers': {'Content-Security-Policy': 'frame-ancestors *'}}"
+    Restart=always
+    Environment="PATH=/opt/miniconda3/envs/neoshare/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+
+    [Install]
+    WantedBy=multi-user.target
+    ```
+
+5.  **启动服务**
+    ```bash
+    systemctl daemon-reload
+    systemctl enable neoshare-backend neoshare-jupyter
+    systemctl start neoshare-backend neoshare-jupyter
+    
+    # 检查状态
+    systemctl status neoshare-backend neoshare-jupyter
+    ```
+
+### 2.2 前端部署
+
+1.  **构建前端代码**
+    ```bash
+    cd /opt/neoshare
+    # 安装依赖
+    npm install
+    # 构建生产环境代码
+    npm run build
+    ```
+    构建完成后，静态文件会生成在 `/opt/neoshare/dist` 目录下。
+
+---
+
+## 3. Nginx 反向代理配置
+
+编辑 Nginx 配置文件 `/etc/nginx/nginx.conf` 或在 `/etc/nginx/conf.d/` 下新建 `neoshare.conf`。
+
+```nginx
+server {
+    listen 80;
+    server_name your_domain_or_ip;  # 替换为你的域名或IP
+
+    # 前端静态文件
+    location / {
+        root /opt/neoshare/dist;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 后端 API 代理
+    location /api {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 上传文件存储目录 (头像等静态资源)
+    # 如果后端通过 /uploads/avatars 访问，需要确保 Nginx 能访问或通过后端代理
+    # 当前项目逻辑中，后端直接提供了静态文件服务还是 Nginx 托管？
+    # 查看代码，User 头像 URL 是 http://localhost:8000/uploads/avatars/...
+    # 所以需要代理 /uploads 到后端，或者直接由 Nginx 托管
+    location /uploads {
+        alias /opt/neoshare/uploads;
+        expires 30d;
+    }
+
+    # Jupyter 反向代理
+    # Jupyter 需要 WebSocket 支持
+    # 注意：这里的 /jupyter/ 必须与 Jupyter 启动参数 --ServerApp.base_url='/jupyter/' 保持一致
+    location /jupyter/ {
+        proxy_pass http://127.0.0.1:8888/jupyter/;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        
+        # WebSocket 支持
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Origin "";
+    }
+}
+```
+
+**注意**：
+1. **Jupyter Base URL**: 文档中已配置 Jupyter 运行在 `/jupyter/` 子路径下。这需要你在 Jupyter 启动命令中添加 `--ServerApp.base_url='/jupyter/'`（已在 systemd 配置中添加）。
+2. **前端配置**: 你需要修改前端代码 `src/components/FileViewer.tsx` 中的 `jupyterBaseUrl`，将其指向生产环境的 `/jupyter` 路径（例如 `http://your_domain/jupyter`），或者在构建时通过环境变量注入。
+3. **Conda 路径**: 确保 Systemd 配置文件中的 Conda 路径 `/opt/miniconda3/envs/neoshare/bin/python` 是正确的。如果你的 Miniconda 安装路径不同，请相应调整。
+
+---
+
+## 4. 验证与测试
+
+1.  **重启 Nginx**
+    ```bash
+    nginx -t
+    systemctl restart nginx
+    ```
+
+2.  **访问验证**
+    *   打开浏览器访问 `http://your_domain_or_ip`，应显示 NeoShare 登录/首页。
+    *   尝试登录、上传文件、预览文件。
+    *   尝试打开 Jupyter Notebook 文件，查看是否能在 iframe 中正常加载。
+
+3.  **SELinux 与 防火墙**
+    如果访问不通，检查防火墙和 SELinux。
+
+    ```bash
+    # 开放 80 端口
+    firewall-cmd --permanent --add-service=http
+    firewall-cmd --reload
+
+    # 临时关闭 SELinux (或者配置相应的规则)
+    setenforce 0
+    ```
+
+## 5. 自定义端口与配置修改
+
+如果您需要修改默认端口（前端 80/Nginx，后端 8000，Jupyter 8888），请参考以下步骤：
+
+### 5.1 修改后端 API 端口
+默认端口：`8000`
+
+1.  **修改 Systemd 服务文件**
+    编辑 `/etc/systemd/system/neoshare-backend.service`：
+    ```ini
+    # 将 8000 改为您想要的端口，例如 9000
+    ExecStart=/opt/miniconda3/envs/neoshare/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 9000 --workers 4
+    ```
+
+2.  **修改 Nginx 配置**
+    编辑 `/etc/nginx/conf.d/neoshare.conf`：
+    ```nginx
+    location /api {
+        # 对应修改后的后端端口
+        proxy_pass http://127.0.0.1:9000;
+        ...
+    }
+    ```
+
+3.  **重启服务**
+    ```bash
+    systemctl daemon-reload
+    systemctl restart neoshare-backend
+    systemctl restart nginx
+    ```
+
+### 5.2 修改 Jupyter 端口
+默认端口：`8888`
+
+1.  **修改 Systemd 服务文件**
+    编辑 `/etc/systemd/system/neoshare-jupyter.service`：
+    ```ini
+    # 将 8888 改为您想要的端口，例如 9999
+    ExecStart=/opt/miniconda3/envs/neoshare/bin/python -m jupyter notebook --ip=127.0.0.1 --port=9999 ...
+    ```
+
+2.  **修改 Nginx 配置**
+    编辑 `/etc/nginx/conf.d/neoshare.conf`：
+    ```nginx
+    location /jupyter/ {
+        # 对应修改后的 Jupyter 端口
+        proxy_pass http://127.0.0.1:9999/jupyter/;
+        ...
+    }
+    ```
+
+3.  **前端代码无需修改**
+    因为前端是通过 Nginx 代理访问 Jupyter（即访问 `/jupyter/` 路径），只要 Nginx 的 `proxy_pass` 指向了正确的内部端口，前端代码中的 URL 不需要变动（前提是前端配置的 `jupyterBaseUrl` 指向的是 Nginx 服务的地址）。
+
+4.  **重启服务**
+    ```bash
+    systemctl daemon-reload
+    systemctl restart neoshare-jupyter
+    systemctl restart nginx
+    ```
+
+### 5.3 修改前端/Nginx 端口
+默认端口：`80`
+
+1.  **修改 Nginx 配置**
+    编辑 `/etc/nginx/conf.d/neoshare.conf`：
+    ```nginx
+    server {
+        # 将 80 改为您想要的端口，例如 8080
+        listen 8080;
+        ...
+    }
+    ```
+
+2.  **重启 Nginx**
+    ```bash
+    systemctl restart nginx
+    ```
+
+3.  **防火墙放行**
+    ```bash
+    firewall-cmd --permanent --add-port=8080/tcp
+    firewall-cmd --reload
+    ```
+
+4.  **前端代码修改 (API Base URL)**
+    前端代码构建时需要知道后端 API 的地址。
+    *   在 `src/api/client.ts` 中，API Base URL 默认为 `http://localhost:8000/api`。
+    *   在生产环境中，通常建议将其修改为 `/api`（相对路径），这样前端会请求当前域名下的 `/api`，由 Nginx 转发给后端。
+    *   修改 `src/api/client.ts`:
+        ```typescript
+        // 生产环境建议使用相对路径，或者通过环境变量配置
+        const API_URL = import.meta.env.VITE_API_URL || '/api';
+        ```
+    *   重新构建前端：`npm run build`。
+
+## 6. 常见问题
+
+*   **Jupyter 404**: 检查 Nginx 的 `location /jupyter/` 配置是否正确，以及 Jupyter 启动参数中是否包含了 `--ServerApp.base_url='/jupyter/'`。
+*   **WebSocket 连接失败**: 确保 Nginx 配置了 `Upgrade` 和 `Connection` 头。
+*   **权限问题**: 确保 Nginx 用户有权限读取 `/opt/neoshare/dist` 目录。
