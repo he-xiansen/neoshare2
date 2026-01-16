@@ -1,26 +1,70 @@
-# NeoShare 部署文档 (CentOS 7.6)
+# NeoShare 部署文档 (CentOS 7.6) - 支持离线迁移
 
-本文档详细说明如何在 CentOS 7.6 环境下部署 NeoShare 项目，包括前端、后端、Jupyter 服务以及 Nginx 反向代理配置。
+本文档详细说明如何在 CentOS 7.6 环境下部署 NeoShare 项目，包括前端、后端、Jupyter 服务以及 Nginx 反向代理配置。文档特别针对离线环境（内网环境）进行了适配，假设所有离线包存储在 `/opt/share` 目录下。
 
-## 1. 环境准备
+## 0. 离线资源准备 (在有网环境执行)
+
+为了支持离线迁移，请在有外网的机器上下载以下资源，并打包传输至目标服务器的 `/opt/share` 目录。
+
+1.  **创建存储目录**
+    ```bash
+    mkdir -p /opt/share
+    ```
+
+2.  **下载 Miniconda 安装脚本**
+    ```bash
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /opt/share/Miniconda3-latest-Linux-x86_64.sh
+    ```
+
+3.  **下载 Node.js 二进制包 (以 v20.10.0 为例)**
+    ```bash
+    wget https://nodejs.org/dist/v20.10.0/node-v20.10.0-linux-x64.tar.xz -O /opt/share/node-v20.10.0-linux-x64.tar.xz
+    ```
+
+4.  **下载项目代码**
+    ```bash
+    # 假设已在项目根目录
+    # 打包项目代码，排除 git 目录
+    tar -czf /opt/share/neoshare.tar.gz --exclude=.git .
+    ```
+
+5.  **下载 Python 依赖包 (Whl)**
+    确保当前环境已安装 `pip`，并建议在 Linux 环境下执行以匹配平台。
+    ```bash
+    mkdir -p /opt/share/pip-packages
+    
+    # 下载后端依赖
+    pip download -d /opt/share/pip-packages -r backend/requirements.txt
+    
+    # 下载 Jupyter 相关依赖
+    pip download -d /opt/share/pip-packages jupyter notebook
+    
+    # 下载基础工具包
+    pip download -d /opt/share/pip-packages setuptools wheel pip
+    ```
+
+6.  **打包迁移**
+    将 `/opt/share` 目录下的所有文件传输到目标服务器的同名目录。
+
+---
+
+## 1. 环境准备 (目标服务器)
 
 ### 1.1 更新系统与安装基础工具
+如果目标服务器可以访问 yum 源（或有本地 yum 源）：
 ```bash
 yum update -y
-yum install -y wget git gcc openssl-devel bzip2-devel libffi-devel zlib-devel make
+yum install -y gcc openssl-devel bzip2-devel libffi-devel zlib-devel make
 ```
 
 ### 1.2 安装 Miniconda (Python 环境)
-使用 Miniconda 管理 Python 环境，比源码编译安装更方便且易于管理。
+使用 `/opt/share` 中的离线脚本安装。
 
 ```bash
-# 下载 Miniconda 安装脚本
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-
 # 执行安装脚本
 # -b: 批处理模式 (自动同意许可协议)
 # -p: 指定安装路径
-bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/miniconda3
+bash /opt/share/Miniconda3-latest-Linux-x86_64.sh -b -p /opt/miniconda3
 
 # 初始化 conda (使其在当前 shell 生效)
 source /opt/miniconda3/bin/activate
@@ -29,8 +73,8 @@ conda init
 # 重新加载 shell 配置
 source ~/.bashrc
 
-# 创建 Python 3.11 环境
-conda create -n neoshare python=3.11 -y
+# 创建 Python 3.10.8 环境
+conda create -n neoshare python=3.10.8 -y
 
 # 激活环境
 conda activate neoshare
@@ -40,11 +84,16 @@ python --version
 ```
 
 ### 1.3 安装 Node.js (用于前端构建)
-推荐安装 Node.js 18.x 或 20.x 版本。
+使用 `/opt/share` 中的离线包安装。
 
 ```bash
-curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-yum install -y nodejs
+# 解压 Node.js 到 /usr/local/lib/nodejs
+mkdir -p /usr/local/lib/nodejs
+tar -xvf /opt/share/node-v20.10.0-linux-x64.tar.xz -C /usr/local/lib/nodejs
+
+# 配置环境变量 (添加到 ~/.bashrc 或 /etc/profile)
+echo 'export PATH=/usr/local/lib/nodejs/node-v20.10.0-linux-x64/bin:$PATH' >> ~/.bashrc
+source ~/.bashrc
 
 # 验证安装
 node -v
@@ -52,7 +101,7 @@ npm -v
 ```
 
 ### 1.4 安装 Nginx
-
+如果目标服务器无法连接公网 yum 源，请使用 rpm 包安装或配置本地 yum 源。如果可以连接：
 ```bash
 yum install -y epel-release
 yum install -y nginx
@@ -64,15 +113,17 @@ systemctl start nginx
 
 ## 2. 项目部署
 
-假设项目代码存放在 `/opt/neoshare` 目录。
+### 2.1 代码迁移
+从 `/opt/share` 解压项目代码。
 
 ```bash
-cd /opt
-git clone <your-repository-url> neoshare
-cd neoshare
+mkdir -p /opt/neoshare
+# 解压代码
+tar -xzf /opt/share/neoshare.tar.gz -C /opt/neoshare
+cd /opt/neoshare
 ```
 
-### 2.1 后端部署
+### 2.2 后端部署
 
 1.  **激活环境**
     ```bash
@@ -80,12 +131,17 @@ cd neoshare
     conda activate neoshare
     ```
 
-2.  **安装依赖**
+2.  **安装依赖 (离线模式)**
+    使用 `--no-index` 和 `--find-links` 指定本地包路径。
     ```bash
-    pip install --upgrade pip
-    pip install -r requirements.txt
-    # 安装 Jupyter 相关依赖
-    pip install jupyter notebook
+    # 安装基础工具
+    pip install --no-index --find-links=/opt/share/pip-packages pip setuptools wheel
+    
+    # 安装项目依赖
+    pip install --no-index --find-links=/opt/share/pip-packages -r requirements.txt
+    
+    # 安装 Jupyter
+    pip install --no-index --find-links=/opt/share/pip-packages jupyter notebook
     ```
 
 3.  **配置 Systemd 服务 (后端 API)**
@@ -142,13 +198,17 @@ cd neoshare
     systemctl status neoshare-backend neoshare-jupyter
     ```
 
-### 2.2 前端部署
+### 2.3 前端部署
 
 1.  **构建前端代码**
+    如果目标服务器 Node.js 环境已就绪：
     ```bash
     cd /opt/neoshare
-    # 安装依赖
-    npm install
+    # 安装依赖 (如果 node_modules 未打包，需要配置 npm 离线镜像或将 node_modules 一并打包)
+    # 建议在准备阶段直接打包 node_modules，或者配置私有 registry
+    # 这里假设 node_modules 已经包含在 neoshare.tar.gz 中或者网络允许
+    # 如果完全离线且未打包 node_modules，请在有网环境执行 npm install 后再打包
+    
     # 构建生产环境代码
     npm run build
     ```
@@ -183,7 +243,6 @@ server {
 
     # 上传文件存储目录 (头像等静态资源)
     # 如果后端通过 /uploads/avatars 访问，需要确保 Nginx 能访问或通过后端代理
-    # 当前项目逻辑中，后端直接提供了静态文件服务还是 Nginx 托管？
     # 查看代码，User 头像 URL 是 http://localhost:8000/uploads/avatars/...
     # 所以需要代理 /uploads 到后端，或者直接由 Nginx 托管
     location /uploads {
