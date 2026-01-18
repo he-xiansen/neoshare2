@@ -81,9 +81,9 @@ async def upload_avatar(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    # 构建 URL (假设后端通过 /uploads/avatars 暴露)
-    # 我们需要在 main.py 中 mount 静态目录
-    avatar_url = f"http://localhost:8000/uploads/avatars/{new_filename}"
+    # 构建 URL (使用相对路径)
+    # 前端访问时会基于当前域名访问，Nginx 负责转发 /uploads 请求
+    avatar_url = f"/uploads/avatars/{new_filename}"
     
     # 更新用户头像
     crud.update_user(db, current_user.id, schemas.UserUpdate(avatar_url=avatar_url))

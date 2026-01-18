@@ -29,19 +29,43 @@
     ```
 
 5.  **下载 Python 依赖包 (Whl)**
-    确保当前环境已安装 `pip`，并建议在 Linux 环境下执行以匹配平台。
+    确保当前环境已安装 `pip`。
+    
+    **关键注意**：如果您是在 Windows/Mac 上为 CentOS 下载依赖，必须指定目标平台为 Linux，否则下载的包（如 psycopg2, cryptography）在 CentOS 上无法安装。
+    
+    建议使用以下命令下载 Linux 兼容包：
+
     ```bash
     mkdir -p /opt/share/pip-packages
     
-    # 下载后端依赖
-    pip download -d /opt/share/pip-packages -r backend/requirements.txt
+    # 1. 下载基础工具 (Linux 版)
+    pip download --dest /opt/share/pip-packages \
+        --python-version 310 \
+        --platform manylinux2014_x86_64 \
+        --implementation cp \
+        --only-binary=:all: \
+        pip setuptools wheel
     
-    # 下载 Jupyter 相关依赖
-    pip download -d /opt/share/pip-packages jupyter notebook
-    
-    # 下载基础工具包
-    pip download -d /opt/share/pip-packages setuptools wheel pip
+    # 2. 下载后端依赖 (Linux 版)
+    # 使用 --platform 指定 Linux 环境，确保下载 manylinux wheels
+    # 使用 --only-binary=:all: 强制下载二进制包 (跨平台下载不支持源码编译)
+    pip download --dest /opt/share/pip-packages \
+        --python-version 310 \
+        --platform manylinux2014_x86_64 \
+        --implementation cp \
+        --only-binary=:all: \
+        -r backend/requirements.txt
+        
+    # 3. 下载 Jupyter 相关依赖 (Linux 版)
+    pip download --dest /opt/share/pip-packages \
+        --python-version 310 \
+        --platform manylinux2014_x86_64 \
+        --implementation cp \
+        --only-binary=:all: \
+        jupyter notebook
     ```
+    
+    *如果遇到“no matching distribution”错误，通常是因为某些包只提供源码包（tar.gz）而没有 Linux Wheel。此时您可能需要在一个真实的 Linux 环境（如 Docker 容器或虚拟机）中执行下载命令：`pip download -d /opt/share/pip-packages -r backend/requirements.txt`*
 
 6.  **打包迁移**
     将 `/opt/share` 目录下的所有文件传输到目标服务器的同名目录。
@@ -176,16 +200,21 @@ cd /opt/neoshare
     [Service]
     User=root
     WorkingDirectory=/opt/neoshare/uploads
-    # 确保 uploads 目录存在
-    ExecStartPre=/bin/mkdir -p /opt/neoshare/uploads
-    # 使用 Conda 环境中的 python 启动 jupyter
-    # 注意：如果启用了 Jupyter base_url，请加上 --ServerApp.base_url='/jupyter/'
-    ExecStart=/opt/miniconda3/envs/neoshare/bin/python -m jupyter notebook --ip=127.0.0.1 --port=8888 --no-browser --ServerApp.base_url='/jupyter/' --ServerApp.token='neoshare2024' --ServerApp.password='' --ServerApp.allow_origin='*' --ServerApp.tornado_settings="{'headers': {'Content-Security-Policy': 'frame-ancestors *'}}"
+    ExecStart=/bin/bash /opt/neoshare/start_jupyter.sh
     Restart=always
     Environment="PATH=/opt/miniconda3/envs/neoshare/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
 
     [Install]
     WantedBy=multi-user.target
+    ```
+
+    同时确保脚本存在并可执行（项目仓库已提供 `start_jupyter.sh`，拷贝到服务器后执行）：
+
+    ```bash
+    cd /opt/neoshare
+    yum install -y dos2unix || true
+    dos2unix start_jupyter.sh || true
+    chmod +x start_jupyter.sh
     ```
 
 5.  **启动服务**
@@ -401,3 +430,83 @@ server {
 *   **Jupyter 404**: 检查 Nginx 的 `location /jupyter/` 配置是否正确，以及 Jupyter 启动参数中是否包含了 `--ServerApp.base_url='/jupyter/'`。
 *   **WebSocket 连接失败**: 确保 Nginx 配置了 `Upgrade` 和 `Connection` 头。
 *   **权限问题**: 确保 Nginx 用户有权限读取 `/opt/neoshare/dist` 目录。
+
+## 7. 故障排查指南
+
+如果服务启动失败，请按照以下步骤进行排查。
+
+### 7.1 查看服务状态与日志
+```bash
+# 查看服务状态
+systemctl status neoshare-backend
+
+# 查看详细日志 (定位报错堆栈)
+journalctl -u neoshare-backend -n 50 --no-pager
+```
+
+### 7.2 手动启动调试
+如果日志不清晰，可以尝试直接在终端运行启动命令，这样可以直接看到错误输出。
+
+**调试后端:**
+```bash
+# 1. 切换到项目目录
+cd /opt/neoshare
+
+# 2. 激活环境
+source /opt/miniconda3/bin/activate neoshare
+
+# 3. 手动运行启动命令
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+如果报错提示 `AttributeError: 'FieldInfo' object has no attribute 'in_'`，说明是 `fastapi` 版本过低与 `pydantic` 2.x 不兼容。
+**解决方法**: 升级 fastapi。
+```bash
+pip install "fastapi>=0.128.0"
+```
+
+**调试 Jupyter:**
+```bash
+cd /opt/neoshare
+
+yum install -y dos2unix || true
+dos2unix start_jupyter.sh || true
+chmod +x start_jupyter.sh
+
+./start_jupyter.sh
+```
+
+
+如果要修改您在界面左上角看到的软件名（即 h1 标签），您需要修改的文件是：
+
+src\components\Sidebar.tsx
+
+在该文件的第 28 行：
+
+```
+<h1 className="text-2xl font-bold 
+text-white tracking-wider">NeoShare</h1>
+```
+将 NeoShare 替换为您想要的名字即可。
+
+💡 建议： 为了保持软件名称的一致性，建议您同步修改以下文件中的名称：
+
+1. 浏览器标签页标题 : index.html (第 7 行)
+   ```
+   <title>NeoShare</title>
+   ```
+2. 登录页面提示 : src\pages\Login.tsx (第 53 行)
+   ```
+   <p className="text-zinc-400 mt-2">登录您
+   的 NeoShare 账号</p>
+   ```
+3. 注册页面提示 : src\pages\Register.tsx (第 49 行)
+   ```
+   <p className="text-zinc-400 mt-2">注册您
+   的 NeoShare 账号</p>
+   ```
+4. 后端 API 文档标题 (可选): backend\main.py (第 5 行)
+   ```
+   app = FastAPI(title="NeoShare API", 
+   version="1.0.0")
+   ```
+如果您需要，我可以帮您一次性把这些地方都改掉，请告诉我您想改成什么名字。

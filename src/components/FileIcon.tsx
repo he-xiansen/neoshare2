@@ -24,6 +24,9 @@ import tsIcon from './icon_code/ts.svg';
 import tsxIcon from './icon_code/tsx.svg';
 import txtIcon from './icon_code/txt.svg';
 import zipIcon from './icon_code/zip.svg';
+import wordIcon from './icon_code/word.svg';
+import excelIcon from './icon_code/Excel.svg';
+import pptIcon from './icon_code/PPT.svg';
 
 interface FileIconProps {
   fileName: string;
@@ -128,6 +131,19 @@ export const FileIconComponent: React.FC<FileIconProps> = ({ fileName, isDir, cl
     case 'tar':
     case 'gz':
       return <img src={zipIcon} alt="zip" className={className} />;
+
+    case 'doc':
+    case 'docx':
+      return <img src={wordIcon} alt="word" className={className} />;
+
+    case 'xls':
+    case 'xlsx':
+    case 'csv':
+      return <img src={excelIcon} alt="excel" className={className} />;
+
+    case 'ppt':
+    case 'pptx':
+      return <img src={pptIcon} alt="ppt" className={className} />;
       
     default:
       return <File className={clsx(className, "text-gray-400")} />;

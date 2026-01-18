@@ -117,9 +117,13 @@ export const Sidebar: React.FC = () => {
       {isAuthenticated && user && (
         <div className="p-4 border-t border-zinc-700 bg-zinc-900/50">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
+            <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold overflow-hidden">
               {user.avatar_url ? (
-                  <img src={user.avatar_url} alt={user.username} className="w-full h-full rounded-full object-cover" />
+                  <img 
+                    src={`${user.avatar_url}?t=${new Date().getTime()}`} 
+                    alt={user.username} 
+                    className="w-full h-full object-cover" 
+                  />
               ) : (
                   user.username[0].toUpperCase()
               )}

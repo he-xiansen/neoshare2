@@ -99,7 +99,11 @@ const Settings: React.FC = () => {
             <div className="relative group cursor-pointer" onClick={handleAvatarClick}>
                 <div className="w-24 h-24 rounded-full bg-zinc-800 overflow-hidden border-2 border-zinc-700 group-hover:border-primary transition-colors">
                     {user?.avatar_url ? (
-                        <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                        <img 
+                            src={`${user.avatar_url}?t=${new Date().getTime()}`} 
+                            alt="Avatar" 
+                            className="w-full h-full object-cover" 
+                        />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-zinc-500 text-2xl font-bold">
                             {user?.username?.[0]?.toUpperCase()}
