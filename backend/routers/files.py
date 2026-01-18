@@ -34,20 +34,16 @@ def get_storage_path(is_public: bool, user_id: int = None):
         return os.path.join(UPLOAD_DIR, str(user_id))
 
 @router.post("/upload", response_model=schemas.FileResponse)
-async def upload_file(
+def upload_file(
     file: UploadFile = File(...),
     path: str = Form(...), # 目标目录路径，如 "/" 或 "/docs"
     is_public: str = Form(...), # "true" or "false"
     db: Session = Depends(database.get_db),
-    token: Optional[str] = Depends(oauth2_scheme)
+    current_user: Optional[models.User] = Depends(get_optional_user) # 使用 Depends 注入
 ):
-    # 手动获取 user
-    current_user = None
-    if token:
-        try:
-            current_user = await auth.get_current_user(token, db)
-        except Exception:
-            pass
+    # 手动获取 user (已移除，使用 Depends)
+    # current_user = None
+    # if token: ...
 
     is_public_bool = is_public.lower() == "true"
     

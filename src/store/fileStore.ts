@@ -97,6 +97,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     try {
       await client.post('/files/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 3600000, // 设置 1 小时超时，适应大文件上传
         onUploadProgress: (progressEvent) => {
           const progress = progressEvent.total
             ? Math.round((progressEvent.loaded * 100) / progressEvent.total)

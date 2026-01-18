@@ -254,6 +254,14 @@ server {
     listen 80;
     server_name your_domain_or_ip;  # 替换为你的域名或IP
 
+    # 设置上传文件大小限制 (例如 5G)
+    client_max_body_size 5G;
+    
+    # 增加超时时间，防止大文件上传中断 (例如 600秒)
+    client_body_timeout 600s;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+
     # 前端静态文件
     location / {
         root /opt/neoshare/dist;
