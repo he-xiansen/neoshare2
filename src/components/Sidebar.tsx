@@ -9,6 +9,14 @@ export const Sidebar: React.FC = () => {
   const { isAuthenticated, user, logout } = useAuthStore();
   const { currentType, setCurrentType, fetchFiles } = useFileStore();
   const navigate = useNavigate();
+  
+  // Use a stable timestamp for avatar to prevent reloading on every render
+  // Only update when user object changes (e.g. after profile update)
+  const [avatarTimestamp, setAvatarTimestamp] = React.useState(Date.now());
+  
+  React.useEffect(() => {
+      setAvatarTimestamp(Date.now());
+  }, [user]);
 
   const handleTypeChange = (type: 'public' | 'private') => {
     setCurrentType(type);
@@ -19,6 +27,15 @@ export const Sidebar: React.FC = () => {
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const getAvatarSrc = (url: string) => {
+    if (url.startsWith('http') || url.startsWith('https')) {
+      return url;
+    }
+    // 前端直接访问 /uploads 需要 Vite 代理，或者直接拼全路径
+    // 如果是 /uploads 开头，且后端在 8000
+    return `http://127.0.0.1:8000${url}`;
   };
 
   return (
@@ -120,7 +137,7 @@ export const Sidebar: React.FC = () => {
             <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold overflow-hidden">
               {user.avatar_url ? (
                   <img 
-                    src={`${user.avatar_url}?t=${new Date().getTime()}`} 
+                    src={`${getAvatarSrc(user.avatar_url)}?t=${avatarTimestamp}`} 
                     alt={user.username} 
                     className="w-full h-full object-cover" 
                   />

@@ -176,7 +176,11 @@ const Home: React.FC = () => {
           file.name.endsWith('.py') ||
           file.name.endsWith('.ts') ||
           file.name.endsWith('.tsx') ||
-          file.name.endsWith('.json');
+          file.name.endsWith('.json') ||
+          file.name.toLowerCase().endsWith('.xlsx') ||
+          file.name.toLowerCase().endsWith('.xls') ||
+          file.name.toLowerCase().endsWith('.csv') ||
+          file.name.toLowerCase().endsWith('.docx');
 
       if (isPreviewable) {
           setPreviewFile(file);

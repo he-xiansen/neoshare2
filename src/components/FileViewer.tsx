@@ -8,6 +8,8 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { NotebookViewer } from './NotebookViewer';
+import { ExcelPreview } from './preview/ExcelPreview';
+import { WordPreview } from './preview/WordPreview';
 
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: Error | null}> {
   constructor(props: {children: React.ReactNode}) {
@@ -53,7 +55,9 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
   const isPdf = file.mime_type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   const isMarkdown = file.name.endsWith('.md') || file.mime_type === 'text/markdown';
   const isIpynb = file.name.endsWith('.ipynb');
-  const isText = !isImage && !isPdf && (
+  const isExcel = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls') || file.name.toLowerCase().endsWith('.csv');
+  const isWord = file.name.toLowerCase().endsWith('.docx');
+  const isText = !isImage && !isPdf && !isExcel && !isWord && (
     file.mime_type?.startsWith('text/') || 
     file.mime_type === 'application/json' ||
     file.mime_type === 'application/javascript' ||
@@ -260,6 +264,10 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
             </div>
           ) : isPdf ? (
             <iframe src={previewUrl} className="w-full h-full border-none" title="PDF Preview" />
+          ) : isExcel ? (
+            <ExcelPreview url={previewUrl} />
+          ) : isWord ? (
+            <WordPreview url={previewUrl} />
           ) : (isText || isIpynb) ? (
             loading ? (
                 <div className="flex items-center justify-center h-full">

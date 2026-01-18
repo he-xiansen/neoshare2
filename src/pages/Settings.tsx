@@ -7,11 +7,27 @@ const Settings: React.FC = () => {
   const { user, checkAuth, login } = useAuthStore();
   const [nickname, setNickname] = useState(user?.nickname || '');
   const [signature, setSignature] = useState(user?.signature || '');
-  // const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url || ''); // 不再手动输入 URL
+  const [tempAvatarUrl, setTempAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Stable timestamp for avatar
+  const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
+  
+  // Update timestamp when user updates or temp avatar changes
+  React.useEffect(() => {
+      setAvatarTimestamp(Date.now());
+  }, [user, tempAvatarUrl]);
+
+  const getAvatarSrc = (url: string) => {
+    if (!url) return '';
+    if (url.startsWith('http') || url.startsWith('https')) {
+      return url;
+    }
+    return `http://127.0.0.1:8000${url}`;
+  };
 
   const handleAvatarClick = () => {
     fileInputRef.current?.click();
@@ -29,23 +45,10 @@ const Settings: React.FC = () => {
         const res = await client.post('/users/avatar', formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
         });
-        // 更新本地 user 信息
-        // 由于 authStore 是 persist 的，我们需要更新它。
-        // 最好的方式是重新 fetch user /auth/me，但 authStore 可能没有这个方法暴露。
-        // 我们可以手动更新 store 中的 user。
-        // 为了简单，我们调用 checkAuth (如果它实现了 fetch me) 或者重新 login (hacky)
-        // 让我们看看 authStore。
         
-        // 假设 checkAuth 会刷新用户信息。如果 store 里没有 checkAuth 刷新逻辑，我们可能需要刷新页面。
-        // 让我们手动更新 user 对象并 set 到 store (如果 store 暴露了 setUser?)
-        // 暂时刷新页面最稳妥，或者 checkAuth。
-        
-        // 既然我们返回了新的 url，我们可以临时显示它。
-        // setAvatarUrl(res.data.avatar_url); 
-        // 重新获取用户信息以同步 store
-        if (checkAuth) await checkAuth(); 
-        
-        setMessage('头像上传成功');
+        // 只更新临时显示的头像，不立即刷新全局用户信息
+        setTempAvatarUrl(res.data.avatar_url);
+        setMessage('头像上传成功，请点击"保存更改"以应用');
     } catch (error) {
         console.error(error);
         setMessage('头像上传失败');
@@ -63,16 +66,21 @@ const Settings: React.FC = () => {
       if (!user) return;
       
       // 调用 PUT /api/users/{id}
-      const updateData = {
+      const updateData: any = {
           nickname,
           signature,
-          // avatar_url: avatarUrl // 头像现在单独处理
       };
+      
+      // 如果有临时头像，说明用户上传了新头像
+      if (tempAvatarUrl) {
+          updateData.avatar_url = tempAvatarUrl;
+      }
       
       await client.put(`/users/${user.id}`, updateData);
       
       setMessage('资料更新成功');
       if (checkAuth) await checkAuth();
+      setTempAvatarUrl(null); // 清除临时状态
       
     } catch (error) {
       console.error(error);
@@ -98,9 +106,9 @@ const Settings: React.FC = () => {
         <div className="flex flex-col items-center mb-8">
             <div className="relative group cursor-pointer" onClick={handleAvatarClick}>
                 <div className="w-24 h-24 rounded-full bg-zinc-800 overflow-hidden border-2 border-zinc-700 group-hover:border-primary transition-colors">
-                    {user?.avatar_url ? (
+                    {(tempAvatarUrl || user?.avatar_url) ? (
                         <img 
-                            src={`${user.avatar_url}?t=${new Date().getTime()}`} 
+                            src={tempAvatarUrl ? `${getAvatarSrc(tempAvatarUrl)}?t=${avatarTimestamp}` : `${getAvatarSrc(user?.avatar_url || '')}?t=${avatarTimestamp}`} 
                             alt="Avatar" 
                             className="w-full h-full object-cover" 
                         />
