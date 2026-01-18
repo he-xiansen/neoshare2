@@ -6,8 +6,7 @@ app = FastAPI(title="NeoShare API", version="1.0.0")
 
 # 配置 CORS
 origins = [
-    "http://localhost:5173",  # Vite 默认端口
-    "http://127.0.0.1:5173",
+    "*",
 ]
 
 app.add_middleware(

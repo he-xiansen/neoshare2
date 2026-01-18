@@ -32,7 +32,6 @@ export const WordPreview: React.FC<WordPreviewProps> = ({ url }) => {
           experimental: false,
           trimXmlDeclaration: true,
           useBase64URL: false,
-          useMathMLPolyfill: false,
           debug: false,
         });
       } catch (err) {
