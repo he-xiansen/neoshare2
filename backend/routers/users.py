@@ -58,13 +58,14 @@ def update_user(
 from fastapi import File, UploadFile
 import os
 import shutil
+import uuid
 
 UPLOAD_DIR = "uploads"
 AVATAR_DIR = os.path.join(UPLOAD_DIR, "avatars")
 os.makedirs(AVATAR_DIR, exist_ok=True)
 
 @router.post("/avatar", response_model=dict)
-async def upload_avatar(
+def upload_avatar(
     file: UploadFile = File(...),
     current_user: models.User = Depends(auth.get_current_active_user),
     db: Session = Depends(database.get_db)
@@ -73,13 +74,34 @@ async def upload_avatar(
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
     
-    # 生成文件名: user_{id}_{filename}
+    # 尝试删除旧头像
+    if current_user.avatar_url:
+        try:
+            # avatar_url: /uploads/avatars/filename
+            # AVATAR_DIR: uploads/avatars
+            old_filename = os.path.basename(current_user.avatar_url)
+            # 安全检查：确保文件名不包含路径遍历字符
+            if ".." not in old_filename and "/" not in old_filename and "\\" not in old_filename:
+                old_file_path = os.path.join(AVATAR_DIR, old_filename)
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
+        except Exception as e:
+            print(f"Failed to delete old avatar: {e}")
+
+    # 生成文件名: user_{id}_{uuid}{ext}，防止缓存问题
     file_extension = os.path.splitext(file.filename)[1]
-    new_filename = f"user_{current_user.id}{file_extension}"
+    if not file_extension:
+        import mimetypes
+        file_extension = mimetypes.guess_extension(file.content_type) or ".jpg"
+        
+    new_filename = f"user_{current_user.id}_{uuid.uuid4().hex[:8]}{file_extension}"
     file_path = os.path.join(AVATAR_DIR, new_filename)
     
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    finally:
+        file.file.close()
         
     # 构建 URL (使用相对路径)
     # 前端访问时会基于当前域名访问，Nginx 负责转发 /uploads 请求

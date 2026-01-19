@@ -261,6 +261,9 @@ server {
     client_body_timeout 600s;
     proxy_read_timeout 600s;
     proxy_send_timeout 600s;
+    
+    # 关键配置：关闭请求缓冲，避免占用双倍磁盘空间，并支持大文件流式传输
+    proxy_request_buffering off;
 
     # 前端静态文件
     location / {

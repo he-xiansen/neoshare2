@@ -106,26 +106,46 @@ def upload_file(
     # 确保物理目录存在
     os.makedirs(full_dir, exist_ok=True)
     
+    # 注意：上传大文件时，Nginx 和 FastAPI 都会生成临时文件，导致磁盘空间看起来比实际少
+    # 例如上传 3GB 文件，Nginx 占用 3GB，FastAPI 占用 3GB，此时 df 显示的剩余空间会减少 6GB
+    # 因此，这里的主动检查可能会误报空间不足，导致无法完成最后的“移动/复制”操作
+    # 我们取消主动检查，直接尝试写入，如果真的空间不足，OS 会抛出异常
+    
     file_path = os.path.join(full_dir, file.filename)
     
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+         import traceback
+         traceback.print_exc()
+         raise HTTPException(status_code=500, detail=f"Error saving file to disk: {str(e)}")
+    finally:
+        file.file.close()
+
+    try:
+        file_size = os.path.getsize(file_path)
+        mime_type = file.content_type
         
-    file_size = os.path.getsize(file_path)
-    mime_type = file.content_type
-    
-    db_path = "/" + target_dir_path if target_dir_path else "/"
-    
-    file_data = schemas.FileCreate(
-        name=file.filename,
-        path=db_path,
-        type="file",
-        size=file_size,
-        mime_type=mime_type,
-        is_public=is_public_bool
-    )
-    
-    return crud.create_file(db=db, file=file_data, user_id=user_id)
+        db_path = "/" + target_dir_path if target_dir_path else "/"
+        
+        file_data = schemas.FileCreate(
+            name=file.filename,
+            path=db_path,
+            type="file",
+            size=file_size,
+            mime_type=mime_type,
+            is_public=is_public_bool
+        )
+        
+        return crud.create_file(db=db, file=file_data, user_id=user_id)
+    except Exception as e:
+        # 如果 DB 失败，删除已上传的文件
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 class DirectoryCreate(schemas.BaseModel):
     name: str
