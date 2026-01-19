@@ -72,7 +72,8 @@ export const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
   const canEdit = isText && (file.is_public || (isAuthenticated && (user?.role === 'admin' || user?.id === file.user_id)));
 
   // Jupyter URL Calculation
-  const jupyterBaseUrl = 'http://localhost:8888';
+  // Use current hostname but port 8888 by default, or override with env var
+  const jupyterBaseUrl = import.meta.env.VITE_JUPYTER_URL || `${window.location.protocol}//${window.location.hostname}:8888`;
   // Hardcoded token for development convenience matching the launch script
   const JUPYTER_TOKEN = 'neoshare2024'; 
   

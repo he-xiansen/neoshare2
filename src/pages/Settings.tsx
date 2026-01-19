@@ -26,7 +26,25 @@ const Settings: React.FC = () => {
     if (url.startsWith('http') || url.startsWith('https')) {
       return url;
     }
-    return `http://127.0.0.1:8000${url}`;
+    // 使用相对路径，让浏览器自动补全域名 (e.g. /uploads/...)
+    // 或者使用环境变量配置的 API_URL 基础路径
+    // 如果 url 是 /uploads/avatars/...，且 Nginx 代理了 /uploads，则直接返回 url
+    if (url.startsWith('/')) {
+        const baseUrl = import.meta.env.VITE_API_URL || '';
+        // 如果 VITE_API_URL 包含 http，则拼接
+        if (baseUrl.startsWith('http')) {
+             // 简单的拼接逻辑，实际可能需要更严谨的处理
+             // 这里假设后端返回的 url 是 /uploads/...
+             // 而 VITE_API_URL 是 http://...:8000/api
+             // 图片通常不在 /api 下，而在根目录下的 /uploads
+             
+             // 如果是在开发环境 (localhost)，且 VITE_API_URL 指向 8000
+             const urlObj = new URL(baseUrl);
+             return `${urlObj.origin}${url}`;
+        }
+        return url;
+    }
+    return url;
   };
 
   const handleAvatarClick = () => {
@@ -46,9 +64,12 @@ const Settings: React.FC = () => {
             headers: { 'Content-Type': 'multipart/form-data' }
         });
         
-        // 只更新临时显示的头像，不立即刷新全局用户信息
-        setTempAvatarUrl(res.data.avatar_url);
-        setMessage('头像上传成功，请点击"保存更改"以应用');
+        // 上传成功后立即同步全局用户状态
+        if (checkAuth) await checkAuth();
+        
+        setMessage('头像更新成功');
+        // 清除临时状态，让界面直接使用更新后的 user.avatar_url
+        setTempAvatarUrl(null); 
     } catch (error) {
         console.error(error);
         setMessage('头像上传失败');
@@ -71,16 +92,13 @@ const Settings: React.FC = () => {
           signature,
       };
       
-      // 如果有临时头像，说明用户上传了新头像
-      if (tempAvatarUrl) {
-          updateData.avatar_url = tempAvatarUrl;
-      }
+      // 头像已在上传时实时保存，此处无需再次提交 avatar_url
+      // 除非我们想支持“未保存时回滚”，但目前后端是立即覆盖的
       
       await client.put(`/users/${user.id}`, updateData);
       
       setMessage('资料更新成功');
       if (checkAuth) await checkAuth();
-      setTempAvatarUrl(null); // 清除临时状态
       
     } catch (error) {
       console.error(error);
@@ -108,9 +126,19 @@ const Settings: React.FC = () => {
                 <div className="w-24 h-24 rounded-full bg-zinc-800 overflow-hidden border-2 border-zinc-700 group-hover:border-primary transition-colors">
                     {(tempAvatarUrl || user?.avatar_url) ? (
                         <img 
+                            key={avatarTimestamp} // 强制重新渲染图片组件
                             src={tempAvatarUrl ? `${getAvatarSrc(tempAvatarUrl)}?t=${avatarTimestamp}` : `${getAvatarSrc(user?.avatar_url || '')}?t=${avatarTimestamp}`} 
                             alt="Avatar" 
                             className="w-full h-full object-cover" 
+                            onError={(e) => {
+                                // 如果图片加载失败，回退到首字母显示
+                                e.currentTarget.style.display = 'none';
+                                e.currentTarget.parentElement?.classList.add('flex', 'items-center', 'justify-center');
+                                const fallback = document.createElement('div');
+                                fallback.className = 'text-zinc-500 text-2xl font-bold';
+                                fallback.innerText = user?.username?.[0]?.toUpperCase() || '?';
+                                e.currentTarget.parentElement?.appendChild(fallback);
+                            }}
                         />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-zinc-500 text-2xl font-bold">

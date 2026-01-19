@@ -33,9 +33,19 @@ export const Sidebar: React.FC = () => {
     if (url.startsWith('http') || url.startsWith('https')) {
       return url;
     }
-    // 前端直接访问 /uploads 需要 Vite 代理，或者直接拼全路径
-    // 如果是 /uploads 开头，且后端在 8000
-    return `http://127.0.0.1:8000${url}`;
+    // 使用相对路径，让浏览器自动补全域名 (e.g. /uploads/...)
+    // 或者使用环境变量配置的 API_URL 基础路径
+    if (url.startsWith('/')) {
+        const baseUrl = import.meta.env.VITE_API_URL || '';
+        // 如果 VITE_API_URL 包含 http，则拼接
+        if (baseUrl.startsWith('http')) {
+             const urlObj = new URL(baseUrl);
+             return `${urlObj.origin}${url}`;
+        }
+        return url;
+    }
+    // Fallback logic
+    return url;
   };
 
   return (
